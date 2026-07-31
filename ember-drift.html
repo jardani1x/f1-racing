@@ -1,0 +1,5507 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<meta name="color-scheme" content="dark">
+<meta name="theme-color" content="#14121C">
+<meta name="description" content="Ember Drift: a browser arena survivor. You are a cooling ember. Stay lit.">
+<title>Ember Drift</title>
+<style>
+/* ---------------------------------------------------------------------------
+   Design tokens.
+   The base is a deep slate-violet rather than black, and the two accents are in
+   tension on purpose: amber is heat, teal is cold, and the whole game is about
+   one becoming the other.
+   Type is a system monospace used as an instrument face -- no webfont, so
+   nothing to fetch and nothing to license.
+--------------------------------------------------------------------------- */
+:root {
+  --ink: #14121C;
+  --ash: #2A2635;
+  --ash-hi: #3B3548;
+  --bone: #E8E3D9;
+  --ember: #FF9F1C;
+  --coal: #7B5EA7;
+  --quench: #3DD6C0;
+  --blood: #E4405F;
+
+  --font-display: ui-monospace, "SFMono-Regular", "Cascadia Mono", Menlo, Consolas, monospace;
+  --font-body: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
+
+  --step-0: 0.6875rem;
+  --step-1: 0.8125rem;
+  --step-2: 1rem;
+  --step-3: clamp(1.25rem, 1rem + 1.2vw, 1.75rem);
+  --step-4: clamp(2rem, 1.2rem + 3.4vw, 3.25rem);
+
+  --track: 0.14em;
+  --gap: 0.75rem;
+  --radius: 3px;
+  --touch: 64px;
+
+  --safe-t: env(safe-area-inset-top, 0px);
+  --safe-b: env(safe-area-inset-bottom, 0px);
+  --safe-l: env(safe-area-inset-left, 0px);
+  --safe-r: env(safe-area-inset-right, 0px);
+}
+
+*, *::before, *::after { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+  overflow: hidden;
+  background: var(--ink);
+  color: var(--bone);
+  font-family: var(--font-body);
+  /* Stops iOS from bumping text size when the device rotates. */
+  -webkit-text-size-adjust: 100%;
+  overscroll-behavior: none;
+}
+
+#app {
+  position: fixed;
+  inset: 0;
+  /* Suppresses double-tap zoom, pull-to-refresh and text selection during play. */
+  touch-action: none;
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-tap-highlight-color: transparent;
+}
+
+#stage {
+  position: absolute;
+  inset: 0;
+  display: block;
+  width: 100%;
+  height: 100%;
+  touch-action: none;
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px; height: 1px;
+  margin: -1px; padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* --- heads-up display -------------------------------------------------- */
+
+#hud {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  transition: opacity 220ms ease;
+  padding: calc(var(--safe-t) + 0.75rem) calc(var(--safe-r) + 0.9rem)
+           calc(var(--safe-b) + 0.75rem) calc(var(--safe-l) + 0.9rem);
+}
+#hud.is-dim { opacity: 0.28; }
+
+/* The only piece of screen furniture that spans the display: a 3px hairline of
+   progress pinned to the very top edge. Everything else stays out of the way. */
+#xp-track {
+  position: absolute;
+  top: 0; left: 0; right: 0;
+  height: 3px;
+  background: var(--ash);
+}
+#xp-fill {
+  height: 100%;
+  background: var(--quench);
+  transform-origin: 0 50%;
+  transform: scaleX(0);
+  will-change: transform;
+}
+
+.readout {
+  position: absolute;
+  display: flex;
+  gap: 1.1rem;
+  align-items: flex-start;
+  font-family: var(--font-display);
+  text-transform: uppercase;
+  letter-spacing: var(--track);
+  font-variant-numeric: tabular-nums;
+  text-shadow: 0 1px 3px rgba(0,0,0,0.85);
+}
+.readout--left { top: calc(var(--safe-t) + 0.8rem); left: calc(var(--safe-l) + 0.9rem); }
+.readout--right { top: calc(var(--safe-t) + 0.8rem); right: calc(var(--safe-r) + 0.9rem); text-align: right; }
+.readout--right .field { align-items: flex-end; }
+
+.field { display: flex; flex-direction: column; gap: 0.2rem; }
+.field__label {
+  font-size: var(--step-0);
+  color: var(--coal);
+  letter-spacing: 0.2em;
+}
+.field__value { font-size: var(--step-3); line-height: 1; color: var(--bone); font-weight: 600; }
+.field__value--clock { color: var(--ember); }
+
+#heat-track {
+  width: 108px;
+  height: 4px;
+  margin-top: 0.35rem;
+  background: var(--ash);
+}
+#heat-fill {
+  height: 100%;
+  background: var(--ember);
+  transform-origin: 100% 50%;
+  transform: scaleX(1);
+  will-change: transform;
+  transition: background-color 200ms linear;
+}
+#heat-fill.is-critical { background: var(--blood); }
+
+#weapon-chips {
+  position: absolute;
+  left: calc(var(--safe-l) + 0.9rem);
+  bottom: calc(var(--safe-b) + 0.9rem);
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  margin: 0; padding: 0;
+  list-style: none;
+}
+.chip {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 0.4rem;
+  padding: 0.28rem 0.5rem;
+  border: 1px solid var(--ash-hi);
+  border-radius: var(--radius);
+  background: rgba(20,18,28,0.72);
+  font-family: var(--font-display);
+  font-size: var(--step-0);
+  text-transform: uppercase;
+  letter-spacing: var(--track);
+}
+.chip__name { color: var(--bone); }
+.chip__level { color: var(--ember); font-weight: 700; }
+
+#btn-mute {
+  position: absolute;
+  right: calc(var(--safe-r) + 0.9rem);
+  bottom: calc(var(--safe-b) + 0.9rem);
+  pointer-events: auto;
+  min-height: 44px;
+  padding: 0.5rem 0.85rem;
+}
+
+#debug {
+  position: absolute;
+  left: calc(var(--safe-l) + 0.9rem);
+  top: 50%;
+  transform: translateY(-50%);
+  font-family: var(--font-display);
+  font-size: var(--step-0);
+  line-height: 1.55;
+  color: var(--quench);
+  white-space: pre;
+  background: rgba(20,18,28,0.8);
+  border-left: 2px solid var(--quench);
+  padding: 0.5rem 0.7rem;
+}
+
+/* --- touch stick -------------------------------------------------------- */
+
+#stick {
+  position: absolute;
+  top: 0; left: 0;
+  width: 0; height: 0;
+  pointer-events: none;
+  z-index: 3;
+}
+#stick::before {
+  content: "";
+  position: absolute;
+  width: 124px; height: 124px;
+  margin: -62px 0 0 -62px;
+  border: 1px solid rgba(232,227,217,0.22);
+  border-radius: 50%;
+}
+#stick-nub {
+  position: absolute;
+  width: 46px; height: 46px;
+  margin: -23px 0 0 -23px;
+  border-radius: 50%;
+  background: rgba(255,159,28,0.24);
+  border: 1px solid var(--ember);
+}
+
+/* --- screens ------------------------------------------------------------ */
+
+#screens { position: absolute; inset: 0; z-index: 4; }
+
+.screen {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-content: center;
+  gap: 1.25rem;
+  padding: calc(var(--safe-t) + 1.5rem) calc(var(--safe-r) + 1.25rem)
+           calc(var(--safe-b) + 1.5rem) calc(var(--safe-l) + 1.25rem);
+  text-align: center;
+  background: rgba(20,18,28,0.86);
+  -webkit-backdrop-filter: blur(7px);
+  backdrop-filter: blur(7px);
+  overflow-y: auto;
+}
+.screen[hidden] { display: none; }
+
+.eyebrow {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: var(--step-0);
+  text-transform: uppercase;
+  letter-spacing: 0.4em;
+  color: var(--coal);
+}
+
+.title {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: var(--step-4);
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.16em;
+  line-height: 1;
+  color: var(--bone);
+}
+/* The one flourish in the whole interface: the title carries the same amber-to-
+   violet cooling gradient as the player's corona ring. */
+.title--brand {
+  background: linear-gradient(96deg, var(--ember) 0%, var(--ember) 38%, var(--coal) 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+.lede {
+  margin: 0 auto;
+  max-width: 46ch;
+  font-size: var(--step-2);
+  line-height: 1.55;
+  color: var(--bone);
+}
+.note {
+  margin: 0 auto;
+  max-width: 52ch;
+  font-size: var(--step-1);
+  line-height: 1.6;
+  color: #A99FBE;
+}
+.note kbd {
+  font-family: var(--font-display);
+  font-size: 0.9em;
+  padding: 0.1em 0.35em;
+  border: 1px solid var(--ash-hi);
+  border-radius: var(--radius);
+  color: var(--bone);
+}
+
+.btn {
+  font-family: var(--font-display);
+  font-size: var(--step-1);
+  text-transform: uppercase;
+  letter-spacing: var(--track);
+  color: var(--ink);
+  background: var(--ember);
+  border: 1px solid var(--ember);
+  border-radius: var(--radius);
+  padding: 0.85rem 1.6rem;
+  min-height: 48px;
+  cursor: pointer;
+  transition: background-color 140ms ease, color 140ms ease;
+}
+.btn:hover { background: #FFB44A; border-color: #FFB44A; }
+.btn--ghost { background: transparent; color: var(--bone); border-color: var(--ash-hi); }
+.btn--ghost:hover { background: var(--ash); border-color: var(--coal); }
+.btn:focus-visible, .card:focus-visible {
+  outline: 2px solid var(--quench);
+  outline-offset: 3px;
+}
+
+.actions { display: flex; gap: 0.75rem; justify-content: center; flex-wrap: wrap; }
+
+.stats {
+  display: flex;
+  gap: 2rem;
+  justify-content: center;
+  margin: 0;
+  font-family: var(--font-display);
+  font-variant-numeric: tabular-nums;
+}
+.stats div { display: flex; flex-direction: column; gap: 0.3rem; }
+.stats dt { font-size: var(--step-0); text-transform: uppercase; letter-spacing: 0.2em; color: var(--coal); }
+.stats dd { margin: 0; font-size: var(--step-3); color: var(--bone); }
+
+/* --- upgrade cards ------------------------------------------------------ */
+
+#cards {
+  display: grid;
+  grid-template-columns: repeat(var(--card-count, 3), minmax(0, 1fr));
+  gap: var(--gap);
+  width: min(940px, 100%);
+  margin-inline: auto;
+}
+@media (max-width: 720px) {
+  #cards { grid-template-columns: 1fr; }
+}
+
+.card {
+  position: relative;
+  display: grid;
+  grid-template-rows: auto auto 1fr auto;
+  justify-items: start;
+  gap: 0.5rem;
+  min-height: var(--touch);
+  padding: 1rem 1rem 0.85rem;
+  text-align: left;
+  color: var(--bone);
+  background: linear-gradient(180deg, #201C2C 0%, #191622 100%);
+  border: 1px solid var(--ash-hi);
+  border-radius: var(--radius);
+  cursor: pointer;
+  transition: border-color 140ms ease, transform 140ms ease;
+}
+.card:hover { border-color: var(--ember); transform: translateY(-2px); }
+.card__key {
+  font-family: var(--font-display);
+  font-size: var(--step-0);
+  color: var(--coal);
+  border: 1px solid var(--ash-hi);
+  border-radius: var(--radius);
+  padding: 0.05rem 0.4rem;
+}
+.card__name {
+  font-family: var(--font-display);
+  font-size: var(--step-2);
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: var(--track);
+  color: var(--ember);
+}
+.card__desc { font-size: var(--step-1); line-height: 1.5; color: #C9C1D8; }
+.card__pips { display: flex; gap: 4px; margin-top: 0.2rem; }
+.card__pips i {
+  width: 16px; height: 3px;
+  background: var(--ash-hi);
+}
+.card__pips i.is-filled { background: var(--quench); }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.001ms !important;
+    transition-duration: 0.001ms !important;
+  }
+  .card:hover { transform: none; }
+}
+</style>
+</head>
+<body>
+<div id="app">
+  <canvas id="stage" aria-label="Ember Drift playfield" role="img"></canvas>
+
+  <div id="hud">
+    <div id="xp-track"><div id="xp-fill"></div></div>
+
+    <div class="readout readout--left">
+      <div class="field">
+        <span class="field__label">Time</span>
+        <span class="field__value field__value--clock" id="stat-clock">00:00</span>
+      </div>
+      <div class="field">
+        <span class="field__label">Level</span>
+        <span class="field__value" id="stat-level">1</span>
+      </div>
+    </div>
+
+    <div class="readout readout--right">
+      <div class="field">
+        <span class="field__label">Kills</span>
+        <span class="field__value" id="stat-kills">0</span>
+      </div>
+      <div class="field">
+        <span class="field__label">Heat</span>
+        <span class="field__value" id="stat-heat">100/100</span>
+        <div id="heat-track"><div id="heat-fill"></div></div>
+      </div>
+    </div>
+
+    <ul id="weapon-chips"></ul>
+    <button type="button" class="btn btn--ghost" id="btn-mute" aria-pressed="false">Sound on</button>
+    <div id="debug" hidden></div>
+  </div>
+
+  <div id="stick" hidden><div id="stick-nub"></div></div>
+
+  <div id="screens">
+    <section id="screen-title" class="screen" aria-labelledby="title-heading">
+      <p class="eyebrow">Arena survivor</p>
+      <h1 class="title title--brand" id="title-heading">Ember Drift</h1>
+      <p class="lede">You are an ember, and you are going out. Everything in the dark is here to help that along.</p>
+      <p class="note">
+        Move with <kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd>, the arrow keys, a gamepad, or by dragging anywhere on screen.
+        You fire on your own — aim with the mouse or right stick if you want to choose a direction.
+        Every level, pick one upgrade.
+      </p>
+      <div class="actions"><button type="button" class="btn" id="btn-start">Start run</button></div>
+    </section>
+
+    <section id="screen-levelup" class="screen" role="dialog" aria-modal="true" aria-labelledby="levelup-heading" hidden>
+      <p class="eyebrow">Level <span id="levelup-level">2</span></p>
+      <h2 class="title" id="levelup-heading">Choose one</h2>
+      <div id="cards"></div>
+      <p class="note">Press <kbd>1</kbd>, <kbd>2</kbd> or <kbd>3</kbd>, or tap a card.</p>
+    </section>
+
+    <section id="screen-paused" class="screen" role="dialog" aria-modal="true" aria-labelledby="paused-heading" hidden>
+      <h2 class="title" id="paused-heading">Paused</h2>
+      <p class="note">The arena is holding still. It will not wait long.</p>
+      <div class="actions">
+        <button type="button" class="btn" id="btn-resume">Resume</button>
+        <button type="button" class="btn btn--ghost" id="btn-restart-pause">Restart run</button>
+      </div>
+    </section>
+
+    <section id="screen-gameover" class="screen" role="dialog" aria-modal="true" aria-labelledby="over-heading" hidden>
+      <p class="eyebrow">Run ended</p>
+      <h2 class="title" id="over-heading">You went out</h2>
+      <dl class="stats">
+        <div><dt>Survived</dt><dd id="final-time">00:00</dd></div>
+        <div><dt>Level</dt><dd id="final-level">1</dd></div>
+        <div><dt>Kills</dt><dd id="final-kills">0</dd></div>
+      </dl>
+      <p class="note" id="best-line"></p>
+      <div class="actions"><button type="button" class="btn" id="btn-restart-over">Run again</button></div>
+    </section>
+  </div>
+
+  <div id="live" class="sr-only" aria-live="polite" role="status"></div>
+</div>
+<script>
+/*!
+ * Ember Drift -- single-file build
+ * Generated by tools/build.js from 20 modules. Do not edit directly.
+ * All art and audio in this file is generated procedurally at runtime.
+ */
+(function () {
+'use strict';
+
+// ---- src/config.js -----------------------------------------------------
+
+/**
+ * Central tunable configuration. Every magic number in the game lives here.
+ * Frozen at module load so a stray write fails loudly instead of silently
+ * desyncing the simulation.
+ */
+
+const SIM = {
+  /** Logical tick rate. All gameplay math is per-second and scaled by dt. */
+  tickHz: 60,
+  /** Ceiling on catch-up sub-steps per frame; prevents the death spiral when a
+   *  tab is backgrounded or the main thread stalls. */
+  maxSubSteps: 5,
+  /** Frame deltas above this are treated as a stall and discarded. */
+  maxFrameSeconds: 0.25,
+};
+
+const LIMITS = {
+  maxEntities: 4096,
+  maxParticles: 3000,
+  maxFloatText: 96,
+  /** Simultaneous enemies. The director stops spawning at this ceiling. */
+  maxEnemies: 420,
+  /** Orb ceiling. Past this the oldest orbs are credited straight to the player
+   *  rather than deleted, which bounds entity count without ever destroying
+   *  experience the player earned. */
+  maxOrbs: 260,
+};
+
+const ARENA = {
+  /** Square arena centred on the origin. Half-extent in world units. */
+  half: 1400,
+  softMargin: 60,
+  gridCell: 128,
+};
+
+const PHYS = {
+  /** Broadphase cell size, tuned to ~2x the largest colliding radius. */
+  cellSize: 64,
+};
+
+const RENDER = {
+  /** Device pixel ratio ceiling. A 3x phone panel triples fragment cost for a
+   *  difference nobody can see at arm's length on moving sprites. */
+  maxDpr: 2,
+  /** Atlas supersampling. Independent of maxDpr so art stays crisp when the
+   *  quality controller drops the framebuffer scale. */
+  atlasScale: 2,
+  /** Arena floor grid spacing, world units. */
+  gridSpacing: 128,
+};
+
+const CAMERA = {
+  /** Reference viewport. Zoom is derived from viewport *area* against this, so
+   *  a portrait phone and an ultrawide monitor both show a fair slice of the
+   *  world instead of one axis collapsing. */
+  referenceWidth: 1080,
+  referenceHeight: 720,
+  minZoom: 0.55,
+  maxZoom: 1.9,
+  /** Exponential follow rate; higher converges faster. */
+  follow: 9,
+  deadzone: 18,
+  shakeDecay: 7.5,
+  maxShake: 22,
+};
+
+const PLAYER = {
+  radius: 13,
+  maxHp: 100,
+  speed: 210,
+  accel: 2400,
+  friction: 12,
+  /** Invulnerability after taking a hit, seconds. */
+  iframes: 0.55,
+  pickupRadius: 78,
+  magnetAccel: 1500,
+  /** Orbs outside pickup range still drift in at this speed. Measured: without
+   *  it, 33% of all experience dropped in a run was never collected, which
+   *  starved progression badly enough that the player never out-scaled the
+   *  spawn director. */
+  orbDriftSpeed: 140,
+  orbDriftDamp: 3,
+  regenPerSecond: 0,
+  critMultiplier: 2,
+};
+
+const PROJECTILE = {
+  radius: 5,
+  speed: 520,
+  lifetime: 1.6,
+  /** A piercing shot cannot re-hit the same enemy within this window. */
+  rehitDelay: 0.2,
+};
+
+const XP = {
+  /** XP to reach level n = base + step*(n-1) + curve*(n-1)^1.55 */
+  base: 5,
+  step: 4,
+  curve: 2.2,
+  orbLifetime: 90,
+};
+
+const DIRECTOR = {
+  spawnRingScale: 1.15,
+  /** Absolute floor so enemies never appear on screen on ultrawide displays. */
+  minSpawnDistance: 460,
+  /** Difficulty ramps over this clock, seconds. */
+  rampSeconds: 600,
+  maxEliteChance: 0.18,
+  eliteHpScale: 4.5,
+  eliteSpeedScale: 0.82,
+  eliteScaleUp: 1.55,
+  eliteXpScale: 6,
+};
+
+const FX = {
+  hitSparks: 4,
+  killSparks: 10,
+  particleDrag: 5.5,
+  floatTextRise: 46,
+  floatTextLife: 0.75,
+  shakeOnHurt: 11,
+  shakeOnKill: 1.1,
+  shakeOnElite: 6,
+};
+
+const AUDIO = {
+  masterGain: 0.55,
+  /** Per-cue rate limit, seconds. Stops 40 simultaneous kills from clipping. */
+  minInterval: {
+    shoot: 0.045,
+    hit: 0.035,
+    kill: 0.05,
+    xp: 0.03,
+    hurt: 0.12,
+    levelup: 0.2,
+    ui: 0.03,
+  },
+};
+
+const HUD = {
+  /** Minimum interactive target, CSS px. WCAG 2.5.5 asks 44; touch wants more. */
+  minTouchTarget: 64,
+  /** HUD refresh ceiling, Hz, to avoid layout thrash. */
+  hudHz: 12,
+};
+
+const INPUT = {
+  gamepadDeadzone: 0.22,
+  /** Virtual stick travel in CSS px before full deflection. */
+  touchStickRadius: 62,
+  analogFloor: 0.14,
+};
+
+const PALETTE = {
+  ink: '#14121C',
+  ash: '#2A2635',
+  bone: '#E8E3D9',
+  ember: '#FF9F1C',
+  coal: '#7B5EA7',
+  quench: '#3DD6C0',
+  blood: '#E4405F',
+};
+
+function deepFreeze(o) {
+  for (const k of Object.keys(o)) {
+    const v = o[k];
+    if (v && typeof v === 'object') deepFreeze(v);
+  }
+  return Object.freeze(o);
+}
+
+for (const o of [SIM, LIMITS, ARENA, PHYS, RENDER, CAMERA, PLAYER, PROJECTILE, XP, DIRECTOR, FX, AUDIO, HUD, INPUT, PALETTE]) {
+  deepFreeze(o);
+}
+
+// ---- src/core/events.js ------------------------------------------------
+
+/**
+ * Minimal synchronous event bus. Decouples simulation from presentation: the
+ * world emits `enemy:killed` and audio/UI/particles subscribe, without the
+ * world holding a reference to any of them.
+ *
+ * Iteration runs backwards so a handler may unsubscribe itself, or anyone later
+ * in the list, mid-dispatch without skipping a subscriber. No array copying,
+ * therefore no per-emit allocation.
+ */
+class EventBus {
+  constructor() {
+    /** @type {Map<string, Function[]>} */
+    this.handlers = new Map();
+  }
+
+  /**
+   * @param {string} type
+   * @param {Function} fn
+   * @returns {() => void} unsubscribe
+   */
+  on(type, fn) {
+    let list = this.handlers.get(type);
+    if (!list) this.handlers.set(type, (list = []));
+    list.push(fn);
+    return () => this.off(type, fn);
+  }
+
+  /** Subscribes for exactly one dispatch. */
+  once(type, fn) {
+    const off = this.on(type, (a, b) => {
+      off();
+      fn(a, b);
+    });
+    return off;
+  }
+
+  off(type, fn) {
+    const list = this.handlers.get(type);
+    if (!list) return;
+    const i = list.indexOf(fn);
+    if (i !== -1) list.splice(i, 1);
+  }
+
+  /**
+   * Two positional payload slots rather than an options object: the hot cues
+   * (`hit`, `xp`) fire hundreds of times per second and an object literal per
+   * emit is pure garbage-collector pressure.
+   */
+  emit(type, a, b) {
+    const list = this.handlers.get(type);
+    if (!list) return;
+    for (let i = list.length - 1; i >= 0; i--) list[i](a, b);
+  }
+
+  clear(type) {
+    if (type === undefined) this.handlers.clear();
+    else this.handlers.delete(type);
+  }
+}
+
+/** Canonical event names. String literals are typo-prone; these are not. */
+const EV = {
+  RUN_START: 'run:start',
+  RUN_END: 'run:end',
+  LEVEL_UP: 'level:up',
+  UPGRADE_PICKED: 'upgrade:picked',
+  ENEMY_HIT: 'enemy:hit',
+  ENEMY_KILLED: 'enemy:killed',
+  PLAYER_HURT: 'player:hurt',
+  PLAYER_HEALED: 'player:healed',
+  XP_COLLECTED: 'xp:collected',
+  SHOT_FIRED: 'shot:fired',
+  WEAPON_GAINED: 'weapon:gained',
+  PAUSE_CHANGED: 'pause:changed',
+};
+
+// ---- src/core/loop.js --------------------------------------------------
+
+/**
+ * Fixed-timestep simulation loop with render interpolation.
+ *
+ * Why fixed-step: gameplay must behave identically at 60, 90, 120 and 144 Hz,
+ * and a variable-dt integrator makes collision, knockback and spawn pacing
+ * refresh-rate dependent. The accumulator drains in whole ticks and hands the
+ * renderer a fractional `alpha` so motion still looks smooth on high-refresh
+ * displays without the simulation ever seeing a partial step.
+ *
+ * All host dependencies (`now`, `raf`, `caf`) are injected, which is what lets
+ * the test suite drive thousands of deterministic ticks with no browser.
+ */
+class GameLoop {
+  /**
+   * @param {object} opts
+   * @param {(dt: number, tick: number) => void} opts.update
+   * @param {(alpha: number, frameDt: number) => void} opts.render
+   * @param {(frameDt: number) => void} [opts.preFrame] runs once per frame before
+   *   any sub-step. Input is sampled here so a frame that runs three sub-steps
+   *   still reads the controller exactly once, at the lowest possible latency.
+   * @param {number} [opts.tickHz]
+   * @param {number} [opts.maxSubSteps]
+   * @param {number} [opts.maxFrameSeconds]
+   * @param {() => number} [opts.now] milliseconds
+   * @param {(cb: (t: number) => void) => number} [opts.raf]
+   * @param {(handle: number) => void} [opts.caf]
+   */
+  constructor(opts) {
+    this.update = opts.update;
+    this.render = opts.render;
+    this.preFrame = opts.preFrame ?? null;
+    this.tickHz = opts.tickHz ?? 60;
+    this.dt = 1 / this.tickHz;
+    this.maxSubSteps = opts.maxSubSteps ?? 5;
+    this.maxFrameSeconds = opts.maxFrameSeconds ?? 0.25;
+    /**
+     * Frame deltas within this distance of a whole number of ticks are snapped
+     * to it. A 60 Hz display driving a 60 Hz simulation reports deltas that
+     * differ from the tick period in the last floating-point bit, so without
+     * snapping roughly one frame in ten leaves the accumulator a hair short and
+     * renders without simulating. The visible result is a periodic micro-stutter
+     * that gets blamed on the game rather than on the arithmetic.
+     */
+    this.snapTolerance = opts.snapTolerance ?? 0.0008;
+
+    const g = typeof globalThis !== 'undefined' ? globalThis : {};
+    this.now = opts.now ?? (g.performance ? () => g.performance.now() : () => Date.now());
+    this.raf = opts.raf ?? (g.requestAnimationFrame ? g.requestAnimationFrame.bind(g) : (cb) => setTimeout(() => cb(this.now()), 16));
+    this.caf = opts.caf ?? (g.cancelAnimationFrame ? g.cancelAnimationFrame.bind(g) : clearTimeout);
+
+    this.running = false;
+    this.paused = false;
+    this.accumulator = 0;
+    this.tick = 0;
+    this.lastTime = 0;
+    this.handle = 0;
+    this.alpha = 1;
+
+    /** Live diagnostics, surfaced by the debug overlay. */
+    this.stats = {
+      fps: 0,
+      frameMs: 0,
+      simMs: 0,
+      renderMs: 0,
+      worstFrameMs: 0,
+      subSteps: 0,
+      /** Ticks discarded because the accumulator exceeded maxSubSteps. */
+      droppedTicks: 0,
+    };
+    this._worstWindow = 0;
+    this._worstReset = 0;
+
+    this._frame = this._frame.bind(this);
+  }
+
+  start() {
+    if (this.running) return;
+    this.running = true;
+    this.lastTime = this.now();
+    this.accumulator = 0;
+    this.handle = this.raf(this._frame);
+  }
+
+  stop() {
+    if (!this.running) return;
+    this.running = false;
+    this.caf(this.handle);
+    this.handle = 0;
+  }
+
+  /**
+   * Pausing keeps rendering (so overlays animate and the frozen playfield stays
+   * on screen) but stops advancing the simulation, and resets the accumulator so
+   * no time debt is repaid as a burst of ticks on resume.
+   */
+  setPaused(value) {
+    if (this.paused === value) return;
+    this.paused = value;
+    if (!value) {
+      this.lastTime = this.now();
+      this.accumulator = 0;
+    }
+  }
+
+  /** Discards accrued time. Call after a long stall (tab hidden, dialog open). */
+  resetClock() {
+    this.lastTime = this.now();
+    this.accumulator = 0;
+  }
+
+  _frame(t) {
+    if (!this.running) return;
+    this.handle = this.raf(this._frame);
+
+    const time = typeof t === 'number' ? t : this.now();
+    let frameDt = (time - this.lastTime) / 1000;
+    this.lastTime = time;
+
+    if (!(frameDt >= 0)) frameDt = 0; // guards NaN and clock skew
+    if (frameDt > this.maxFrameSeconds) frameDt = this.maxFrameSeconds;
+    frameDt = this._snap(frameDt);
+    this.stats.frameMs = frameDt * 1000;
+
+    if (this.stats.frameMs > this._worstWindow) this._worstWindow = this.stats.frameMs;
+    if (time - this._worstReset > 1000) {
+      this.stats.worstFrameMs = this._worstWindow;
+      this._worstWindow = 0;
+      this._worstReset = time;
+    }
+    // Exponential moving average: a raw 1/dt readout is unreadably noisy.
+    const instant = frameDt > 0 ? 1 / frameDt : 0;
+    this.stats.fps = this.stats.fps === 0 ? instant : this.stats.fps * 0.9 + instant * 0.1;
+
+    if (this.preFrame) this.preFrame(frameDt);
+
+    let steps = 0;
+    if (!this.paused) {
+      this.accumulator += frameDt;
+      const simStart = this.now();
+      while (this.accumulator >= this.dt && steps < this.maxSubSteps) {
+        this.accumulator -= this.dt;
+        this.tick++;
+        steps++;
+        this.update(this.dt, this.tick);
+      }
+      this.stats.simMs = this.now() - simStart;
+      if (this.accumulator >= this.dt) {
+        // Irrecoverably behind: drop the debt rather than accumulate it, which
+        // is the difference between a brief hitch and a permanent slow-motion
+        // spiral on a weak device.
+        const dropped = Math.floor(this.accumulator / this.dt);
+        this.stats.droppedTicks += dropped;
+        this.accumulator -= dropped * this.dt;
+      }
+      this.alpha = this.accumulator / this.dt;
+    } else {
+      this.alpha = 1;
+    }
+    this.stats.subSteps = steps;
+
+    const renderStart = this.now();
+    this.render(this.alpha, frameDt);
+    this.stats.renderMs = this.now() - renderStart;
+  }
+
+  /**
+   * Snaps a frame delta onto a whole number of tick periods when it is already
+   * within tolerance. Only the first few multiples are worth testing: they cover
+   * every common display rate from 30 Hz through 240 Hz relative to a 60 Hz
+   * simulation, and beyond that the delta is a stall, not a refresh interval.
+   */
+  _snap(frameDt) {
+    const tol = this.snapTolerance;
+    for (let k = 1; k <= this.maxSubSteps; k++) {
+      const target = this.dt * k;
+      if (Math.abs(frameDt - target) < tol) return target;
+    }
+    // Sub-tick deltas (a 120 Hz panel on a 60 Hz simulation) snap to a clean
+    // fraction for the same reason, so alpha advances evenly.
+    const half = this.dt / 2;
+    if (Math.abs(frameDt - half) < tol) return half;
+    return frameDt;
+  }
+
+  /** Advances the simulation by exactly n ticks. Test and debug affordance. */
+  stepTicks(n) {
+    for (let i = 0; i < n; i++) {
+      this.tick++;
+      this.update(this.dt, this.tick);
+    }
+  }
+}
+
+// ---- src/core/math.js --------------------------------------------------
+
+/** Allocation-free scalar and 2D vector helpers used by the simulation. */
+
+const TAU = Math.PI * 2;
+const EPSILON = 1e-6;
+
+function clamp(v, lo, hi) {
+  return v < lo ? lo : v > hi ? hi : v;
+}
+
+function lerp(a, b, t) {
+  return a + (b - a) * t;
+}
+
+/** Inverse lerp, clamped to [0,1]. Returns 0 when the range is degenerate. */
+function invLerp(a, b, v) {
+  const d = b - a;
+  if (Math.abs(d) < EPSILON) return 0;
+  return clamp((v - a) / d, 0, 1);
+}
+
+/**
+ * Frame-rate independent exponential approach. `rate` is the reciprocal of the
+ * time constant: higher converges faster. Correct under variable dt, unlike the
+ * common `a += (b - a) * 0.1` idiom.
+ */
+function damp(current, target, rate, dt) {
+  return target + (current - target) * Math.exp(-rate * dt);
+}
+
+/** Moves `current` toward `target` by at most `maxDelta`. */
+function approach(current, target, maxDelta) {
+  const d = target - current;
+  if (d > maxDelta) return current + maxDelta;
+  if (d < -maxDelta) return current - maxDelta;
+  return target;
+}
+
+function len(x, y) {
+  return Math.sqrt(x * x + y * y);
+}
+
+function dist2(ax, ay, bx, by) {
+  const dx = bx - ax;
+  const dy = by - ay;
+  return dx * dx + dy * dy;
+}
+
+function smoothstep(t) {
+  const x = clamp(t, 0, 1);
+  return x * x * (3 - 2 * x);
+}
+
+function easeOutCubic(t) {
+  const x = 1 - clamp(t, 0, 1);
+  return 1 - x * x * x;
+}
+
+function easeOutBack(t) {
+  const x = clamp(t, 0, 1) - 1;
+  const c = 1.70158;
+  return 1 + (c + 1) * x * x * x + c * x * x;
+}
+
+/** Wraps an angle into (-PI, PI]. */
+function wrapAngle(a) {
+  let x = a % TAU;
+  if (x > Math.PI) x -= TAU;
+  else if (x <= -Math.PI) x += TAU;
+  return x;
+}
+
+/**
+ * Shortest-path angular interpolation, so facing that crosses the -PI/+PI seam
+ * does not spin the long way round.
+ */
+function lerpAngle(a, b, t) {
+  return a + wrapAngle(b - a) * t;
+}
+
+/** Circle-vs-circle overlap on squared distance, no sqrt. */
+function circlesOverlap(ax, ay, ar, bx, by, br) {
+  const r = ar + br;
+  return dist2(ax, ay, bx, by) <= r * r;
+}
+
+// ---- src/core/rng.js ---------------------------------------------------
+
+/**
+ * Deterministic pseudo-random source (mulberry32).
+ *
+ * Chosen over Math.random because the simulation must be reproducible: the same
+ * seed plus the same input sequence must yield an identical run. That property
+ * is what makes the headless tests meaningful and bug reports replayable.
+ * Allocation-free and 32-bit, which is well beyond what gameplay needs.
+ */
+class Rng {
+  /** @param {number} seed */
+  constructor(seed = 0x9e3779b9) {
+    this.seed(seed);
+  }
+
+  /** @param {number} s */
+  seed(s) {
+    // Force to uint32 and avoid the degenerate all-zero state.
+    this.state = (s >>> 0) || 0x9e3779b9;
+    return this;
+  }
+
+  /** Uniform float in [0,1). */
+  next() {
+    let t = (this.state = (this.state + 0x6d2b79f5) >>> 0);
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  }
+
+  float(min, max) {
+    return min + this.next() * (max - min);
+  }
+
+  /** Uniform integer in [min,max] inclusive. */
+  int(min, max) {
+    return min + Math.floor(this.next() * (max - min + 1));
+  }
+
+  chance(p) {
+    return this.next() < p;
+  }
+
+  /** @template T @param {ArrayLike<T>} arr @returns {T} */
+  pick(arr) {
+    return arr[Math.floor(this.next() * arr.length)];
+  }
+
+  angle() {
+    return this.next() * Math.PI * 2;
+  }
+
+  /**
+   * Weighted pick over a parallel weight array; returns an index, or -1 when
+   * total weight is non-positive (every candidate was filtered out).
+   * @param {ArrayLike<number>} weights
+   * @param {number} count how many leading entries are valid
+   */
+  weightedIndex(weights, count) {
+    let total = 0;
+    for (let i = 0; i < count; i++) total += weights[i] > 0 ? weights[i] : 0;
+    if (total <= 0) return -1;
+    let r = this.next() * total;
+    for (let i = 0; i < count; i++) {
+      const w = weights[i] > 0 ? weights[i] : 0;
+      if (r < w) return i;
+      r -= w;
+    }
+    return count - 1;
+  }
+
+  /** Fisher-Yates in place. */
+  shuffle(arr) {
+    for (let i = arr.length - 1; i > 0; i--) {
+      const j = Math.floor(this.next() * (i + 1));
+      const t = arr[i];
+      arr[i] = arr[j];
+      arr[j] = t;
+    }
+    return arr;
+  }
+}
+
+// ---- src/audio/audio.js ------------------------------------------------
+
+/**
+ * Procedural audio engine.
+ *
+ * Every sound is synthesised from oscillators and a generated noise buffer. As
+ * with the art, this is a deliberate choice rather than a shortcut: no audio
+ * files to fetch or decode, nothing to attribute or license, and cue pitch can
+ * respond to game state (experience pips rise with level progress) in a way that
+ * pre-rendered samples cannot.
+ *
+ * The context is created on the first user gesture because every current browser
+ * blocks or suspends audio started without one. Until then every call is a no-op,
+ * so callers never need to check.
+ *
+ * Per-cue rate limiting is essential rather than cosmetic: forty simultaneous
+ * kills would otherwise stack forty gain envelopes and clip hard.
+ */
+class AudioEngine {
+  constructor() {
+    /** @type {AudioContext | null} */
+    this.ctx = null;
+    this.master = null;
+    this.noise = null;
+    this.muted = false;
+    this.volume = AUDIO.masterGain;
+    this._last = Object.create(null);
+    this._rng = new Rng(0xa0d10);
+    this._failed = false;
+  }
+
+  /** Idempotent. Call from a click, keydown or touch handler. */
+  unlock() {
+    if (this.ctx || this._failed) {
+      if (this.ctx && this.ctx.state === 'suspended') this.ctx.resume();
+      return;
+    }
+    const Ctor = globalThis.AudioContext || /** @type {any} */ (globalThis).webkitAudioContext;
+    if (!Ctor) {
+      this._failed = true;
+      return;
+    }
+    try {
+      this.ctx = new Ctor();
+      this.master = this.ctx.createGain();
+      this.master.gain.value = this.muted ? 0 : this.volume;
+      this.master.connect(this.ctx.destination);
+      this.noise = this._buildNoise();
+      if (this.ctx.state === 'suspended') this.ctx.resume();
+    } catch {
+      // A blocked or unavailable audio context must never break the game.
+      this._failed = true;
+      this.ctx = null;
+    }
+  }
+
+  /** One second of deterministic white noise, reused by every noise-based cue. */
+  _buildNoise() {
+    const ctx = this.ctx;
+    const len = Math.floor(ctx.sampleRate);
+    const buf = ctx.createBuffer(1, len, ctx.sampleRate);
+    const data = buf.getChannelData(0);
+    for (let i = 0; i < len; i++) data[i] = this._rng.float(-1, 1);
+    return buf;
+  }
+
+  setMuted(value) {
+    this.muted = value;
+    if (this.master) this.master.gain.value = value ? 0 : this.volume;
+  }
+
+  toggleMute() {
+    this.setMuted(!this.muted);
+    return this.muted;
+  }
+
+  setVolume(v) {
+    this.volume = Math.max(0, Math.min(1, v));
+    if (this.master && !this.muted) this.master.gain.value = this.volume;
+  }
+
+  /** @returns {boolean} whether the cue passed its rate limit */
+  _gate(cue) {
+    if (!this.ctx || this.muted) return false;
+    const min = AUDIO.minInterval[cue] ?? 0;
+    const now = this.ctx.currentTime;
+    const last = this._last[cue] ?? -1e9;
+    if (now - last < min) return false;
+    this._last[cue] = now;
+    return true;
+  }
+
+  /**
+   * Percussive gain envelope. Ramping to a small positive value rather than 0
+   * before an exponential ramp avoids the click that exponentialRampToValueAtTime
+   * produces when it is handed exactly zero.
+   */
+  _env(gain, t0, peak, attack, decay) {
+    const g = gain.gain;
+    g.setValueAtTime(0.0001, t0);
+    g.linearRampToValueAtTime(peak, t0 + attack);
+    g.exponentialRampToValueAtTime(0.0001, t0 + attack + decay);
+  }
+
+  _tone(type, freqStart, freqEnd, t0, dur, peak, destination) {
+    const ctx = this.ctx;
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.type = type;
+    osc.frequency.setValueAtTime(freqStart, t0);
+    if (freqEnd !== freqStart) osc.frequency.exponentialRampToValueAtTime(Math.max(1, freqEnd), t0 + dur);
+    this._env(gain, t0, peak, Math.min(0.01, dur * 0.2), dur);
+    osc.connect(gain).connect(destination || this.master);
+    osc.start(t0);
+    osc.stop(t0 + dur + 0.05);
+    return osc;
+  }
+
+  _noiseBurst(t0, dur, peak, filterType, freq, q = 1) {
+    const ctx = this.ctx;
+    const src = ctx.createBufferSource();
+    src.buffer = this.noise;
+    // Random offset so consecutive bursts are not bit-identical, which is what
+    // makes repeated hits sound mechanical.
+    src.loop = true;
+    const filter = ctx.createBiquadFilter();
+    filter.type = filterType;
+    filter.frequency.value = freq;
+    filter.Q.value = q;
+    const gain = ctx.createGain();
+    this._env(gain, t0, peak, 0.004, dur);
+    src.connect(filter).connect(gain).connect(this.master);
+    src.start(t0, this._rng.float(0, 0.8));
+    src.stop(t0 + dur + 0.05);
+  }
+
+  /**
+   * @param {'shoot'|'hit'|'kill'|'xp'|'hurt'|'levelup'|'ui'|'death'} cue
+   * @param {number} [param] cue-specific: xp uses it as level progress in [0,1]
+   */
+  play(cue, param = 0) {
+    if (!this._gate(cue)) return;
+    const ctx = this.ctx;
+    const t = ctx.currentTime + 0.001;
+
+    switch (cue) {
+      case 'shoot':
+        this._tone('square', 460, 190, t, 0.055, 0.055);
+        this._noiseBurst(t, 0.02, 0.02, 'highpass', 2200);
+        break;
+      case 'hit':
+        this._noiseBurst(t, 0.045, 0.05, 'bandpass', 1500, 1.4);
+        break;
+      case 'kill':
+        this._noiseBurst(t, 0.1, 0.06, 'lowpass', 900);
+        this._tone('sine', 130, 55, t, 0.12, 0.075);
+        break;
+      case 'xp': {
+        // Pitch tracks progress toward the next level, so the ear learns how
+        // close the bar is without looking at it.
+        const base = 620 + 300 * Math.max(0, Math.min(1, param));
+        this._tone('sine', base, base * 1.28, t, 0.075, 0.035);
+        break;
+      }
+      case 'hurt':
+        this._tone('sawtooth', 180, 70, t, 0.22, 0.12);
+        this._noiseBurst(t, 0.1, 0.07, 'lowpass', 700);
+        break;
+      case 'levelup': {
+        const notes = [523.25, 659.25, 783.99];
+        for (let i = 0; i < notes.length; i++) {
+          this._tone('triangle', notes[i], notes[i], t + i * 0.075, 0.16, 0.075);
+        }
+        break;
+      }
+      case 'ui':
+        this._tone('triangle', 880, 880, t, 0.03, 0.05);
+        break;
+      case 'death':
+        this._tone('sawtooth', 240, 38, t, 1.1, 0.14);
+        this._noiseBurst(t, 0.9, 0.08, 'lowpass', 500);
+        break;
+      default:
+        break;
+    }
+  }
+}
+
+// ---- src/game/content.js -----------------------------------------------
+
+/**
+ * Data-driven game content: art identifiers, enemy archetypes, weapons and
+ * upgrades.
+ *
+ * Everything here is plain data plus pure functions. Behaviour is expressed as
+ * an integer tag the simulation switches on rather than a per-entity closure,
+ * because a virtual call per enemy per tick at 500 enemies is measurable and a
+ * switch is not. Adding an enemy, weapon or upgrade means appending to an array
+ * in this file; no system needs editing unless a genuinely new behaviour or
+ * firing pattern is introduced.
+ */
+
+/** Art identifiers. The atlas generates one procedural sprite per entry. */
+const SPRITE = {
+  PLAYER: 0,
+  HUSK: 1,
+  DARTER: 2,
+  BULWARK: 3,
+  SPITTER: 4,
+  BOLT: 5,
+  ENEMY_BOLT: 6,
+  ORB: 7,
+  SPARK: 8,
+  GLOW: 9,
+  COUNT: 10,
+};
+
+const BEHAVIOR = { CHASE: 0, DARTER: 1, BULWARK: 2, SPITTER: 3 };
+
+const PATTERN = { AIMED: 0, RADIAL: 1, SWEEP: 2 };
+
+/**
+ * Enemy archetypes, indexed by `typeId`. `weight(t)` is the spawn weight as a
+ * function of run progress t in [0,1]; returning <= 0 removes the type from the
+ * pool, which is how the early game stays legible before darters appear.
+ */
+const ENEMY_TYPES = [
+  {
+    key: 'husk',
+    name: 'Husk',
+    sprite: SPRITE.HUSK,
+    behavior: BEHAVIOR.CHASE,
+    hp: 12,
+    speed: 62,
+    radius: 14,
+    damage: 8,
+    xp: 1,
+    contactCooldown: 0.7,
+    scale: 1,
+    weight: (t) => 10 - 5 * t,
+  },
+  {
+    key: 'darter',
+    name: 'Darter',
+    sprite: SPRITE.DARTER,
+    behavior: BEHAVIOR.DARTER,
+    hp: 8,
+    speed: 132,
+    radius: 11,
+    damage: 6,
+    xp: 2,
+    contactCooldown: 0.5,
+    scale: 0.92,
+    weight: (t) => (t < 0.07 ? 0 : 9 * Math.min(1, (t - 0.07) / 0.2)),
+  },
+  {
+    key: 'spitter',
+    name: 'Spitter',
+    sprite: SPRITE.SPITTER,
+    behavior: BEHAVIOR.SPITTER,
+    hp: 18,
+    speed: 74,
+    radius: 13,
+    damage: 5,
+    xp: 3,
+    contactCooldown: 0.8,
+    scale: 1,
+    /** Ranged pressure, kept scarce: two on screen is a threat, ten is noise. */
+    weight: (t) => (t < 0.2 ? 0 : 5 * Math.min(1, (t - 0.2) / 0.25)),
+    range: { hold: 270, tooClose: 215, tooFar: 340, fire: 430 },
+    reload: 2.1,
+    shotSpeed: 240,
+    shotDamage: 9,
+  },
+  {
+    key: 'bulwark',
+    name: 'Bulwark',
+    sprite: SPRITE.BULWARK,
+    behavior: BEHAVIOR.BULWARK,
+    hp: 78,
+    speed: 44,
+    radius: 22,
+    damage: 16,
+    xp: 6,
+    contactCooldown: 0.9,
+    scale: 1.35,
+    weight: (t) => (t < 0.34 ? 0 : 4.5 * Math.min(1, (t - 0.34) / 0.3)),
+  },
+];
+
+const ENEMY_BY_KEY = Object.freeze(
+  ENEMY_TYPES.reduce((m, t, i) => ((m[t.key] = i), m), /** @type {Record<string,number>} */ ({}))
+);
+
+/** Largest collider in the game. Used to size broadphase query radii. */
+const MAX_ENEMY_RADIUS = ENEMY_TYPES.reduce(
+  (m, t) => Math.max(m, t.radius * t.scale * 1.6),
+  0
+);
+
+/**
+ * Weapons. Levels scale damage additively and cooldown multiplicatively:
+ * additive damage keeps early levels meaningful, and multiplicative cooldown
+ * has diminishing returns so fire rate cannot reach zero.
+ */
+const WEAPONS = [
+  {
+    key: 'bolt',
+    name: 'Ember Bolt',
+    desc: 'Snaps a bolt at the nearest husk. Never stops.',
+    pattern: PATTERN.AIMED,
+    sprite: SPRITE.BOLT,
+    cooldown: 0.44,
+    damage: 7,
+    damagePerLevel: 3,
+    cooldownPerLevel: 0.9,
+    count: 1,
+    countPerLevel: 0,
+    spread: 0.1,
+    speed: 1,
+    pierce: 0,
+    ttl: 1.6,
+    radius: 5,
+  },
+  {
+    key: 'nova',
+    name: 'Flare Burst',
+    desc: 'Vents heat in a ring. Clears anything standing too close.',
+    pattern: PATTERN.RADIAL,
+    sprite: SPRITE.BOLT,
+    cooldown: 2.6,
+    damage: 9,
+    damagePerLevel: 4,
+    cooldownPerLevel: 0.91,
+    count: 8,
+    countPerLevel: 2,
+    spread: 0,
+    speed: 0.72,
+    pierce: 1,
+    ttl: 0.62,
+    radius: 6,
+  },
+  {
+    key: 'lash',
+    name: 'Arc Lash',
+    desc: 'A short instant arc where you are facing. Hits everything in it.',
+    pattern: PATTERN.SWEEP,
+    sprite: SPRITE.SPARK,
+    cooldown: 1.05,
+    damage: 14,
+    damagePerLevel: 6,
+    cooldownPerLevel: 0.92,
+    count: 1,
+    countPerLevel: 0,
+    /** Half-angle of the sweep, radians. */
+    spread: 0.95,
+    speed: 1,
+    pierce: 0,
+    ttl: 0,
+    radius: 118,
+    radiusPerLevel: 9,
+  },
+];
+
+const WEAPON_BY_KEY = Object.freeze(
+  WEAPONS.reduce((m, w, i) => ((m[w.key] = i), m), /** @type {Record<string,number>} */ ({}))
+);
+
+/** @param {number} index @param {number} level 1-based */
+function weaponDamage(index, level) {
+  const w = WEAPONS[index];
+  return w.damage + w.damagePerLevel * (level - 1);
+}
+
+function weaponCooldown(index, level) {
+  const w = WEAPONS[index];
+  return w.cooldown * Math.pow(w.cooldownPerLevel, level - 1);
+}
+
+function weaponCount(index, level) {
+  const w = WEAPONS[index];
+  return w.count + w.countPerLevel * (level - 1);
+}
+
+function weaponRadius(index, level) {
+  const w = WEAPONS[index];
+  return w.radius + (w.radiusPerLevel ?? 0) * (level - 1);
+}
+
+/** Base player stats before any upgrade is applied. */
+function baseStats() {
+  return {
+    damageMul: 1,
+    fireRateMul: 1,
+    moveSpeedMul: 1,
+    maxHpBonus: 0,
+    extraProjectiles: 0,
+    extraPierce: 0,
+    pickupRadiusMul: 1,
+    critChance: 0,
+    projectileSpeedMul: 1,
+    xpMul: 1,
+    armor: 0,
+    regen: 0,
+  };
+}
+
+/**
+ * Upgrade catalogue. `apply` mutates a stats object and is called once per
+ * stack, so every effect must be order-independent (pure add or pure multiply)
+ * to keep two identical builds numerically identical.
+ *
+ * `available(ctx)` gates an offer. `ctx` exposes `{ ownsWeapon, weaponLevel,
+ * stacks, level }`, which is how weapon grants disappear once taken and weapon
+ * refinements only appear once the weapon is owned.
+ */
+const UPGRADES = [
+  {
+    key: 'ember_core',
+    name: 'Ember Core',
+    desc: '+25% damage',
+    max: 5,
+    // The backbone upgrades carry extra weight on purpose: with seventeen
+    // entries in the catalogue, an even distribution meant a measured run could
+    // reach level 8 without ever being offered a damage increase, and then get
+    // buried by the spawn director.
+    weight: 14,
+    apply: (s) => { s.damageMul *= 1.25; },
+  },
+  {
+    key: 'bellows',
+    name: 'Bellows',
+    desc: '+18% fire rate',
+    max: 5,
+    weight: 14,
+    apply: (s) => { s.fireRateMul *= 1.18; },
+  },
+  {
+    key: 'drift',
+    name: 'Drift',
+    desc: '+12% move speed',
+    max: 4,
+    weight: 8,
+    apply: (s) => { s.moveSpeedMul *= 1.12; },
+  },
+  {
+    key: 'stoke',
+    name: 'Stoke',
+    desc: '+20 max heat, and refill 20',
+    max: 5,
+    weight: 9,
+    heals: 20,
+    apply: (s) => { s.maxHpBonus += 20; },
+  },
+  {
+    key: 'split',
+    name: 'Split Flame',
+    desc: '+1 projectile',
+    max: 3,
+    weight: 6,
+    apply: (s) => { s.extraProjectiles += 1; },
+  },
+  {
+    key: 'lance',
+    name: 'Lance',
+    desc: '+1 pierce',
+    max: 3,
+    weight: 6,
+    apply: (s) => { s.extraPierce += 1; },
+  },
+  {
+    key: 'lodestone',
+    name: 'Lodestone',
+    desc: '+45% pickup range',
+    max: 3,
+    weight: 7,
+    apply: (s) => { s.pickupRadiusMul *= 1.45; },
+  },
+  {
+    key: 'hairline',
+    name: 'Hairline Crack',
+    desc: '+8% critical chance',
+    max: 4,
+    weight: 7,
+    apply: (s) => { s.critChance += 0.08; },
+  },
+  {
+    key: 'kindling',
+    name: 'Kindling',
+    desc: '+15% projectile speed',
+    max: 3,
+    weight: 6,
+    apply: (s) => { s.projectileSpeedMul *= 1.15; },
+  },
+  {
+    key: 'siphon',
+    name: 'Siphon',
+    desc: '+18% experience',
+    max: 3,
+    weight: 6,
+    apply: (s) => { s.xpMul *= 1.18; },
+  },
+  {
+    key: 'carapace',
+    name: 'Carapace',
+    desc: '-2 damage from every hit',
+    max: 4,
+    weight: 7,
+    apply: (s) => { s.armor += 2; },
+  },
+  {
+    key: 'quench',
+    name: 'Quench',
+    desc: 'Recover 0.8 heat per second',
+    max: 3,
+    weight: 6,
+    apply: (s) => { s.regen += 0.8; },
+  },
+  {
+    key: 'grant_nova',
+    name: 'Flare Burst',
+    desc: 'New weapon. Vents a ring of flame.',
+    max: 1,
+    weight: 9,
+    grantWeapon: 'nova',
+    available: (ctx) => !ctx.ownsWeapon('nova'),
+  },
+  {
+    key: 'grant_lash',
+    name: 'Arc Lash',
+    desc: 'New weapon. Instant arc where you face.',
+    max: 1,
+    weight: 9,
+    grantWeapon: 'lash',
+    available: (ctx) => !ctx.ownsWeapon('lash'),
+  },
+  {
+    key: 'bolt_up',
+    name: 'Ember Bolt +',
+    desc: 'Level up Ember Bolt',
+    max: 6,
+    weight: 13,
+    levelWeapon: 'bolt',
+  },
+  {
+    key: 'nova_up',
+    name: 'Flare Burst +',
+    desc: 'Level up Flare Burst',
+    max: 6,
+    weight: 8,
+    levelWeapon: 'nova',
+    available: (ctx) => ctx.ownsWeapon('nova'),
+  },
+  {
+    key: 'lash_up',
+    name: 'Arc Lash +',
+    desc: 'Level up Arc Lash',
+    max: 6,
+    weight: 8,
+    levelWeapon: 'lash',
+    available: (ctx) => ctx.ownsWeapon('lash'),
+  },
+];
+
+const UPGRADE_BY_KEY = Object.freeze(
+  UPGRADES.reduce((m, u, i) => ((m[u.key] = i), m), /** @type {Record<string,number>} */ ({}))
+);
+
+/**
+ * Recomputes stats from scratch given stack counts. Deriving rather than
+ * incrementally mutating means a stat can never drift out of sync with the
+ * build, and makes the whole progression system a pure function under test.
+ * @param {ArrayLike<number>} stacks parallel to UPGRADES
+ */
+function computeStats(stacks) {
+  const s = baseStats();
+  for (let i = 0; i < UPGRADES.length; i++) {
+    const n = stacks[i] | 0;
+    if (n <= 0) continue;
+    const u = UPGRADES[i];
+    if (!u.apply) continue;
+    for (let k = 0; k < n; k++) u.apply(s);
+  }
+  return s;
+}
+
+/** XP required to advance from `level` to the next. */
+function xpForLevel(level) {
+  const n = Math.max(1, level) - 1;
+  return Math.round(5 + 4 * n + 2.2 * Math.pow(n, 1.55));
+}
+
+// ---- src/core/pool.js --------------------------------------------------
+
+/**
+ * Recycling helpers. Both exist for one reason: the simulation must not
+ * allocate during a tick. One minor GC at the wrong moment is a visible hitch,
+ * and 16.6 ms is the entire frame budget at 60 FPS.
+ */
+
+/**
+ * Free-list index allocator over fixed capacity. Hands out dense integer slots
+ * into structure-of-arrays component storage.
+ */
+class SlotAllocator {
+  /** @param {number} capacity */
+  constructor(capacity) {
+    this.capacity = capacity;
+    this.free = new Int32Array(capacity);
+    this.freeCount = capacity;
+    // Seeded in reverse so the first allocations come out 0,1,2..., which keeps
+    // early-game memory access sequential and legible in a debugger.
+    for (let i = 0; i < capacity; i++) this.free[i] = capacity - 1 - i;
+  }
+
+  /** @returns {number} slot index, or -1 when exhausted. */
+  alloc() {
+    if (this.freeCount === 0) return -1;
+    return this.free[--this.freeCount];
+  }
+
+  /** @param {number} slot @returns {boolean} whether the slot was accepted */
+  release(slot) {
+    if (slot < 0 || slot >= this.capacity) return false;
+    if (this.freeCount >= this.capacity) return false;
+    this.free[this.freeCount++] = slot;
+    return true;
+  }
+
+  reset() {
+    this.freeCount = this.capacity;
+    for (let i = 0; i < this.capacity; i++) this.free[i] = this.capacity - 1 - i;
+  }
+
+  get used() {
+    return this.capacity - this.freeCount;
+  }
+}
+
+/**
+ * Object pool for instances that genuinely need to be objects (audio voices,
+ * DOM-bound view models). Gameplay entities use SoA arrays instead, so this is
+ * deliberately absent from the hot path.
+ * @template T
+ */
+class ObjectPool {
+  /**
+   * @param {() => T} factory
+   * @param {(item: T) => void} [reset]
+   * @param {number} [prewarm]
+   */
+  constructor(factory, reset, prewarm = 0) {
+    this.factory = factory;
+    this.resetFn = reset;
+    /** @type {T[]} */
+    this.idle = [];
+    this.liveCount = 0;
+    for (let i = 0; i < prewarm; i++) this.idle.push(factory());
+  }
+
+  /** @returns {T} */
+  acquire() {
+    this.liveCount++;
+    return this.idle.length ? this.idle.pop() : this.factory();
+  }
+
+  /** @param {T} item */
+  release(item) {
+    if (this.resetFn) this.resetFn(item);
+    this.idle.push(item);
+    if (this.liveCount > 0) this.liveCount--;
+  }
+}
+
+// ---- src/core/entities.js ----------------------------------------------
+
+/**
+ * Entity kinds. Each gets its own dense id list so systems iterate exactly the
+ * entities they care about with no per-item kind branch.
+ */
+const KIND = {
+  PLAYER: 0,
+  ENEMY: 1,
+  BULLET: 2,
+  ENEMY_BULLET: 3,
+  ORB: 4,
+  COUNT: 5,
+};
+
+const FLAG = {
+  ALIVE: 1 << 0,
+  ELITE: 1 << 1,
+  /** Set for one tick when damaged, so the view can flash the sprite. */
+  HURT: 1 << 2,
+};
+
+/**
+ * Structure-of-arrays entity storage.
+ *
+ * Deliberately not a general-purpose ECS. The component set here is fixed and
+ * known, so archetype tables and a query planner would buy nothing but
+ * indirection; parallel typed arrays give the same cache locality with a
+ * fraction of the surface area. Every field is preallocated at construction, so
+ * a full arena of 4096 entities allocates nothing at runtime.
+ *
+ * Destruction is deferred: `destroy` only clears the ALIVE bit, and `flush`
+ * compacts the group lists at a tick boundary. Systems can therefore kill
+ * entities mid-iteration without invalidating the list they are walking.
+ */
+class EntityStore {
+  /** @param {number} capacity */
+  constructor(capacity) {
+    this.capacity = capacity;
+    this.slots = new SlotAllocator(capacity);
+
+    // --- transform & motion -------------------------------------------------
+    this.x = new Float32Array(capacity);
+    this.y = new Float32Array(capacity);
+    /** Position at the start of the current tick, for render interpolation. */
+    this.px = new Float32Array(capacity);
+    this.py = new Float32Array(capacity);
+    this.vx = new Float32Array(capacity);
+    this.vy = new Float32Array(capacity);
+    this.rot = new Float32Array(capacity);
+    this.radius = new Float32Array(capacity);
+    this.scale = new Float32Array(capacity);
+
+    // --- combat -------------------------------------------------------------
+    this.hp = new Float32Array(capacity);
+    this.maxHp = new Float32Array(capacity);
+    this.damage = new Float32Array(capacity);
+    this.speed = new Float32Array(capacity);
+    this.ttl = new Float32Array(capacity);
+    this.pierce = new Int16Array(capacity);
+    this.xpValue = new Float32Array(capacity);
+    /** Counts down a per-entity cooldown: contact damage, or hurt flash. */
+    this.cooldown = new Float32Array(capacity);
+    /** Behaviour-local scratch timer (spitter reload, darter jink phase). */
+    this.phase = new Float32Array(capacity);
+    /** Seconds remaining on the damage flash. Presentation only. */
+    this.flash = new Float32Array(capacity);
+
+    // --- identity -----------------------------------------------------------
+    this.kind = new Uint8Array(capacity);
+    this.typeId = new Uint8Array(capacity);
+    this.sprite = new Uint8Array(capacity);
+    this.flags = new Uint8Array(capacity);
+    /**
+     * Bumped on every release. Lets a stored reference detect that its slot was
+     * recycled: without this, a piercing bullet's "already hit" lock could
+     * suppress a legitimate hit on a brand-new enemy that reused the slot.
+     */
+    this.gen = new Uint16Array(capacity);
+    /** Last entity this bullet damaged, as slot + generation. */
+    this.lastHit = new Int32Array(capacity);
+    this.lastHitGen = new Uint16Array(capacity);
+
+    // --- dense per-kind iteration lists -------------------------------------
+    /** @type {Int32Array[]} */
+    this.groups = new Array(KIND.COUNT);
+    this.groupCount = new Int32Array(KIND.COUNT);
+    for (let k = 0; k < KIND.COUNT; k++) this.groups[k] = new Int32Array(capacity);
+    /** Position of each entity inside its group list, for O(1) swap-removal. */
+    this.groupSlot = new Int32Array(capacity);
+
+    this.pendingKill = new Int32Array(capacity);
+    this.pendingCount = 0;
+  }
+
+  /**
+   * @param {number} kind
+   * @returns {number} entity id, or -1 when storage is exhausted. Callers must
+   *   handle -1; silently returning slot 0 would corrupt the player entity.
+   */
+  create(kind) {
+    const id = this.slots.alloc();
+    if (id === -1) return -1;
+    this.kind[id] = kind;
+    this.flags[id] = FLAG.ALIVE;
+    this.scale[id] = 1;
+    this.rot[id] = 0;
+    this.vx[id] = 0;
+    this.vy[id] = 0;
+    this.ttl[id] = 0;
+    this.pierce[id] = 0;
+    this.cooldown[id] = 0;
+    this.phase[id] = 0;
+    this.flash[id] = 0;
+    this.lastHit[id] = -1;
+    this.lastHitGen[id] = 0;
+    const g = this.groups[kind];
+    const n = this.groupCount[kind];
+    g[n] = id;
+    this.groupSlot[id] = n;
+    this.groupCount[kind] = n + 1;
+    return id;
+  }
+
+  /** Places an entity, zeroing interpolation history so it does not streak in. */
+  place(id, x, y) {
+    this.x[id] = x;
+    this.y[id] = y;
+    this.px[id] = x;
+    this.py[id] = y;
+  }
+
+  isAlive(id) {
+    return id >= 0 && id < this.capacity && (this.flags[id] & FLAG.ALIVE) !== 0;
+  }
+
+  /** Validates a stored reference against the slot's generation. */
+  isSameEntity(id, gen) {
+    return this.isAlive(id) && this.gen[id] === gen;
+  }
+
+  /** Marks for removal. Idempotent, and safe to call mid-iteration. */
+  destroy(id) {
+    if (!this.isAlive(id)) return false;
+    this.flags[id] &= ~FLAG.ALIVE;
+    this.pendingKill[this.pendingCount++] = id;
+    return true;
+  }
+
+  /** Compacts group lists and returns slots to the allocator. Call once per tick. */
+  flush() {
+    for (let i = 0; i < this.pendingCount; i++) {
+      const id = this.pendingKill[i];
+      const kind = this.kind[id];
+      const g = this.groups[kind];
+      const last = this.groupCount[kind] - 1;
+      const slot = this.groupSlot[id];
+      // Swap-remove: move the tail entity into the hole and fix its back-pointer.
+      const moved = g[last];
+      g[slot] = moved;
+      this.groupSlot[moved] = slot;
+      this.groupCount[kind] = last;
+      this.gen[id] = (this.gen[id] + 1) & 0xffff;
+      this.slots.release(id);
+    }
+    this.pendingCount = 0;
+  }
+
+  /** Copies current positions into the interpolation history. Call before integration. */
+  snapshotTransforms() {
+    for (let k = 0; k < KIND.COUNT; k++) {
+      const g = this.groups[k];
+      const n = this.groupCount[k];
+      for (let i = 0; i < n; i++) {
+        const id = g[i];
+        this.px[id] = this.x[id];
+        this.py[id] = this.y[id];
+      }
+    }
+  }
+
+  count(kind) {
+    return this.groupCount[kind];
+  }
+
+  reset() {
+    this.slots.reset();
+    this.groupCount.fill(0);
+    this.pendingCount = 0;
+    this.flags.fill(0);
+    // Generations are intentionally preserved across resets so handles held by
+    // anything outside the store cannot alias a fresh run's entities.
+  }
+}
+
+// ---- src/render/renderer.js --------------------------------------------
+
+/**
+ * Draw layers, in painter order. Kept coarse on purpose: Canvas2D pays for state
+ * changes, not for draw calls, so the backend sets blend mode and fill style once
+ * per layer rather than once per command.
+ */
+const LAYER = {
+  FLOOR: 0,
+  ORBS: 1,
+  ENEMIES: 2,
+  PLAYER: 3,
+  PROJECTILES: 4,
+  PARTICLES: 5,
+  OVERLAY: 6,
+  TEXT: 7,
+  COUNT: 8,
+};
+
+const CMD = { SPRITE: 0, DOT: 1, ARC: 2, TEXT: 3, RING: 4 };
+
+/**
+ * Backend-agnostic command buffer.
+ *
+ * This is the seam that keeps gameplay independent of the graphics API. The view
+ * layer describes *what* to draw in world coordinates; a backend decides how. The
+ * Canvas2D backend shipped here can be swapped for WebGL2 without a single
+ * change above this line, which is the whole reason the indirection exists.
+ *
+ * Commands are structure-of-arrays and the buffer is only ever reset, never
+ * reallocated, so a frame with 3000 particles allocates nothing.
+ */
+class DrawList {
+  /** @param {number} capacity */
+  constructor(capacity) {
+    this.capacity = capacity;
+    this.count = 0;
+    this.type = new Uint8Array(capacity);
+    this.sprite = new Uint8Array(capacity);
+    this.tint = new Uint8Array(capacity);
+    // Generic float slots. Meaning depends on the command; documented per push.
+    this.f0 = new Float32Array(capacity);
+    this.f1 = new Float32Array(capacity);
+    this.f2 = new Float32Array(capacity);
+    this.f3 = new Float32Array(capacity);
+    this.f4 = new Float32Array(capacity);
+    this.f5 = new Float32Array(capacity);
+
+    /** @type {Int32Array[]} */
+    this.layers = new Array(LAYER.COUNT);
+    this.layerCount = new Int32Array(LAYER.COUNT);
+    for (let i = 0; i < LAYER.COUNT; i++) this.layers[i] = new Int32Array(capacity);
+    this.dropped = 0;
+  }
+
+  reset() {
+    this.count = 0;
+    this.layerCount.fill(0);
+    this.dropped = 0;
+  }
+
+  /** @returns {number} command index, or -1 when the buffer is full */
+  _push(layer, type) {
+    if (this.count >= this.capacity) {
+      this.dropped++;
+      return -1;
+    }
+    const i = this.count++;
+    this.type[i] = type;
+    const n = this.layerCount[layer];
+    this.layers[layer][n] = i;
+    this.layerCount[layer] = n + 1;
+    return i;
+  }
+
+  /** f0..f5 = x, y, rotation, scale, alpha, unused */
+  spriteCmd(layer, spriteId, x, y, rot, scale, alpha, tint = 255) {
+    const i = this._push(layer, CMD.SPRITE);
+    if (i === -1) return;
+    this.sprite[i] = spriteId;
+    this.tint[i] = tint;
+    this.f0[i] = x;
+    this.f1[i] = y;
+    this.f2[i] = rot;
+    this.f3[i] = scale;
+    this.f4[i] = alpha;
+  }
+
+  /** Axis-aligned tinted square. f0..f3 = x, y, halfSize, alpha */
+  dot(layer, x, y, halfSize, tint, alpha) {
+    const i = this._push(layer, CMD.DOT);
+    if (i === -1) return;
+    this.tint[i] = tint;
+    this.f0[i] = x;
+    this.f1[i] = y;
+    this.f2[i] = halfSize;
+    this.f3[i] = alpha;
+  }
+
+  /** f0..f5 = x, y, radius, startAngle, endAngle, lineWidth */
+  arc(layer, x, y, radius, start, end, lineWidth, tint, alpha) {
+    const i = this._push(layer, CMD.ARC);
+    if (i === -1) return;
+    this.tint[i] = tint;
+    this.f0[i] = x;
+    this.f1[i] = y;
+    this.f2[i] = radius;
+    this.f3[i] = start;
+    this.f4[i] = end;
+    this.f5[i] = lineWidth;
+    this.sprite[i] = Math.round(clamp(alpha, 0, 1) * 255);
+  }
+
+  /** f0..f4 = x, y, numeric value, alpha, scale. sprite slot carries the crit flag. */
+  text(layer, x, y, value, tint, alpha, scale, crit) {
+    const i = this._push(layer, CMD.TEXT);
+    if (i === -1) return;
+    this.tint[i] = tint;
+    this.sprite[i] = crit ? 1 : 0;
+    this.f0[i] = x;
+    this.f1[i] = y;
+    this.f2[i] = value;
+    this.f3[i] = alpha;
+    this.f4[i] = scale;
+  }
+}
+
+/**
+ * View transform, screen fitting and screen shake.
+ *
+ * Zoom is derived from viewport *area* rather than height. Height alone collapses
+ * on a portrait phone: a 390x844 panel would show 720 world units vertically and
+ * only 333 horizontally, so enemies would appear from the sides already on top of
+ * the player. Area-based fitting gives every aspect ratio a fair slice.
+ */
+class Camera {
+  constructor() {
+    this.x = 0;
+    this.y = 0;
+    this.zoom = 1;
+    this.cssWidth = 1;
+    this.cssHeight = 1;
+    this.dpr = 1;
+    this.shakeX = 0;
+    this.shakeY = 0;
+    /** World-space view bounds including a margin, recomputed each frame for culling. */
+    this.minX = 0;
+    this.maxX = 0;
+    this.minY = 0;
+    this.maxY = 0;
+    this._refArea = Math.sqrt(CAMERA.referenceWidth * CAMERA.referenceHeight);
+  }
+
+  /**
+   * @param {number} cssWidth
+   * @param {number} cssHeight
+   * @param {number} rawDpr
+   */
+  resize(cssWidth, cssHeight, rawDpr) {
+    this.cssWidth = Math.max(1, cssWidth);
+    this.cssHeight = Math.max(1, cssHeight);
+    this.dpr = clamp(rawDpr || 1, 1, RENDER.maxDpr);
+    const area = Math.sqrt(this.cssWidth * this.cssHeight);
+    this.zoom = clamp(area / this._refArea, CAMERA.minZoom, CAMERA.maxZoom);
+  }
+
+  /** World units visible across the viewport. */
+  get viewWorldWidth() {
+    return this.cssWidth / this.zoom;
+  }
+
+  get viewWorldHeight() {
+    return this.cssHeight / this.zoom;
+  }
+
+  /** Half-diagonal in world units; the spawn director uses this to stay off screen. */
+  get halfDiagonal() {
+    return 0.5 * len(this.viewWorldWidth, this.viewWorldHeight);
+  }
+
+  /**
+   * @param {number} dt real frame delta, not the fixed tick
+   * @param {number} targetX
+   * @param {number} targetY
+   * @param {number} shake magnitude from the simulation
+   * @param {import('../core/rng.js').Rng} rng
+   * @param {boolean} allowShake false honours prefers-reduced-motion
+   */
+  update(dt, targetX, targetY, shake, rng, allowShake) {
+    // Deadzone: without it the camera micro-corrects on every frame of player
+    // drift and the whole scene shimmers.
+    const dx = targetX - this.x;
+    const dy = targetY - this.y;
+    const d = len(dx, dy);
+    if (d > CAMERA.deadzone) {
+      const overshoot = (d - CAMERA.deadzone) / d;
+      const gx = this.x + dx * overshoot;
+      const gy = this.y + dy * overshoot;
+      this.x = damp(this.x, gx, CAMERA.follow, dt);
+      this.y = damp(this.y, gy, CAMERA.follow, dt);
+    }
+
+    if (allowShake && shake > 0.05) {
+      const m = Math.min(shake, CAMERA.maxShake);
+      this.shakeX = rng.float(-m, m);
+      this.shakeY = rng.float(-m, m);
+    } else {
+      this.shakeX = 0;
+      this.shakeY = 0;
+    }
+
+    const halfW = this.viewWorldWidth / 2;
+    const halfH = this.viewWorldHeight / 2;
+    // Cull margin covers the largest sprite half-extent plus shake travel.
+    const margin = 80 + CAMERA.maxShake;
+    const cx = this.x + this.shakeX;
+    const cy = this.y + this.shakeY;
+    this.minX = cx - halfW - margin;
+    this.maxX = cx + halfW + margin;
+    this.minY = cy - halfH - margin;
+    this.maxY = cy + halfH + margin;
+  }
+
+  /** Conservative world-space visibility test used to cull draw commands. */
+  isVisible(x, y) {
+    return x >= this.minX && x <= this.maxX && y >= this.minY && y <= this.maxY;
+  }
+}
+
+/** Quality tiers, high to low. */
+const TIER = { HIGH: 2, MEDIUM: 1, LOW: 0 };
+
+/**
+ * Adaptive quality controller.
+ *
+ * The target is a stable 60 FPS on hardware that is not known in advance, so the
+ * renderer measures itself and sheds the most expensive, least legible work
+ * first: additive blending, then particle volume, then floating combat text. It
+ * never touches anything the player needs in order to read the game state.
+ *
+ * Downgrades latch. Oscillating between tiers is worse than sitting one tier low,
+ * because every transition is itself visible, so promotion requires a long run of
+ * comfortable frames and stops permanently after repeated demotions.
+ */
+class QualityController {
+  constructor(startTier = TIER.HIGH) {
+    this.tier = startTier;
+    this.demotions = 0;
+    this._goodSeconds = 0;
+    this._accum = 0;
+    this._worst = 0;
+    this._samples = 0;
+    /** Fraction of simulated particles actually drawn at the current tier. */
+    this.particleFraction = 1;
+    this.additive = true;
+    this.showFloatText = true;
+    this._apply();
+  }
+
+  /** @param {number} frameMs @param {number} dt */
+  sample(frameMs, dt) {
+    this._accum += dt;
+    this._samples++;
+    if (frameMs > this._worst) this._worst = frameMs;
+    if (this._accum < 1) return;
+
+    const worst = this._worst;
+    this._accum = 0;
+    this._worst = 0;
+    // Ignore the first second: the atlas build, font load and first layout all
+    // land there and none of them recur.
+    if (this._samples < 20) {
+      this._samples = 0;
+      return;
+    }
+    this._samples = 0;
+
+    if (worst > 26 && this.tier > TIER.LOW) {
+      this.tier--;
+      this.demotions++;
+      this._goodSeconds = 0;
+      this._apply();
+      return;
+    }
+    if (worst < 15) {
+      this._goodSeconds++;
+      // Four demotions means the device genuinely cannot hold the higher tier;
+      // stop trying, because every promotion attempt costs a visible hitch.
+      if (this._goodSeconds >= 6 && this.tier < TIER.HIGH && this.demotions < 4) {
+        this.tier++;
+        this._goodSeconds = 0;
+        this._apply();
+      }
+    } else {
+      this._goodSeconds = 0;
+    }
+  }
+
+  _apply() {
+    switch (this.tier) {
+      case TIER.HIGH:
+        this.particleFraction = 1;
+        this.additive = true;
+        this.showFloatText = true;
+        break;
+      case TIER.MEDIUM:
+        this.particleFraction = 0.6;
+        this.additive = true;
+        this.showFloatText = true;
+        break;
+      default:
+        this.particleFraction = 0.3;
+        this.additive = false;
+        this.showFloatText = false;
+        break;
+    }
+  }
+
+  get label() {
+    return this.tier === TIER.HIGH ? 'high' : this.tier === TIER.MEDIUM ? 'medium' : 'low';
+  }
+}
+
+// ---- src/game/fx.js ----------------------------------------------------
+
+/** Particle colour slots. The view maps these to palette entries. */
+const TINT = { EMBER: 0, COAL: 1, QUENCH: 2, BONE: 3, BLOOD: 4 };
+
+/**
+ * Fixed-capacity particle simulation.
+ *
+ * Particles are not entities: they never collide, never take damage and never
+ * need an id, so putting them in the entity store would waste eleven component
+ * arrays per particle and pollute the broadphase. A dedicated ring of typed
+ * arrays with swap-removal keeps 3000 of them at a fraction of the cost.
+ *
+ * When the buffer is full new particles are dropped rather than evicting live
+ * ones: dropping the newest is invisible during a heavy frame, whereas evicting
+ * the oldest makes existing effects blink out.
+ */
+class ParticleSystem {
+  /** @param {number} capacity */
+  constructor(capacity) {
+    this.capacity = capacity;
+    this.count = 0;
+    this.x = new Float32Array(capacity);
+    this.y = new Float32Array(capacity);
+    this.px = new Float32Array(capacity);
+    this.py = new Float32Array(capacity);
+    this.vx = new Float32Array(capacity);
+    this.vy = new Float32Array(capacity);
+    this.life = new Float32Array(capacity);
+    this.maxLife = new Float32Array(capacity);
+    this.size = new Float32Array(capacity);
+    this.tint = new Uint8Array(capacity);
+    this.drag = new Float32Array(capacity);
+  }
+
+  /** @returns {boolean} false when the buffer is saturated. */
+  spawn(x, y, vx, vy, life, size, tint, drag = FX.particleDrag) {
+    if (this.count >= this.capacity) return false;
+    const i = this.count++;
+    this.x[i] = x;
+    this.y[i] = y;
+    this.px[i] = x;
+    this.py[i] = y;
+    this.vx[i] = vx;
+    this.vy[i] = vy;
+    this.life[i] = life;
+    this.maxLife[i] = life;
+    this.size[i] = size;
+    this.tint[i] = tint;
+    this.drag[i] = drag;
+    return true;
+  }
+
+  /**
+   * Emits `n` particles in a cone. Kept here rather than at call sites so the
+   * gameplay systems never touch particle internals.
+   */
+  burst(rng, x, y, n, speedMin, speedMax, life, size, tint, dirX = 0, dirY = 0, spread = Math.PI * 2) {
+    const baseAngle = dirX || dirY ? Math.atan2(dirY, dirX) : 0;
+    for (let i = 0; i < n; i++) {
+      const a = spread >= Math.PI * 2 ? rng.angle() : baseAngle + rng.float(-spread, spread);
+      const sp = rng.float(speedMin, speedMax);
+      this.spawn(x, y, Math.cos(a) * sp, Math.sin(a) * sp, rng.float(life * 0.65, life), rng.float(size * 0.6, size), tint);
+    }
+  }
+
+  update(dt) {
+    let n = this.count;
+    for (let i = 0; i < n; i++) {
+      const l = this.life[i] - dt;
+      if (l <= 0) {
+        // Swap-remove and re-test this index, since the tail moved into it.
+        n--;
+        this._swap(i, n);
+        i--;
+        continue;
+      }
+      this.life[i] = l;
+      this.px[i] = this.x[i];
+      this.py[i] = this.y[i];
+      const k = Math.exp(-this.drag[i] * dt);
+      this.vx[i] *= k;
+      this.vy[i] *= k;
+      this.x[i] += this.vx[i] * dt;
+      this.y[i] += this.vy[i] * dt;
+    }
+    this.count = n;
+  }
+
+  _swap(a, b) {
+    if (a === b) return;
+    this.x[a] = this.x[b];
+    this.y[a] = this.y[b];
+    this.px[a] = this.px[b];
+    this.py[a] = this.py[b];
+    this.vx[a] = this.vx[b];
+    this.vy[a] = this.vy[b];
+    this.life[a] = this.life[b];
+    this.maxLife[a] = this.maxLife[b];
+    this.size[a] = this.size[b];
+    this.tint[a] = this.tint[b];
+    this.drag[a] = this.drag[b];
+  }
+
+  clear() {
+    this.count = 0;
+  }
+}
+
+/**
+ * Floating combat text. Values are numeric so nothing has to allocate a string
+ * during the tick; the renderer formats on demand and caches per integer.
+ */
+class FloatTextSystem {
+  constructor(capacity) {
+    this.capacity = capacity;
+    this.count = 0;
+    this.x = new Float32Array(capacity);
+    this.y = new Float32Array(capacity);
+    this.value = new Float32Array(capacity);
+    this.life = new Float32Array(capacity);
+    this.maxLife = new Float32Array(capacity);
+    this.tint = new Uint8Array(capacity);
+    this.crit = new Uint8Array(capacity);
+  }
+
+  spawn(x, y, value, tint, crit = false) {
+    // Damage numbers are the first thing to sacrifice under load: when the
+    // buffer is full the oldest is recycled, because the newest number is the
+    // one the player is actually looking for.
+    let i;
+    if (this.count < this.capacity) i = this.count++;
+    else i = 0;
+    this.x[i] = x;
+    this.y[i] = y;
+    this.value[i] = value;
+    this.life[i] = FX.floatTextLife;
+    this.maxLife[i] = FX.floatTextLife;
+    this.tint[i] = tint;
+    this.crit[i] = crit ? 1 : 0;
+  }
+
+  update(dt) {
+    let n = this.count;
+    for (let i = 0; i < n; i++) {
+      const l = this.life[i] - dt;
+      if (l <= 0) {
+        n--;
+        this._swap(i, n);
+        i--;
+        continue;
+      }
+      this.life[i] = l;
+      this.y[i] -= FX.floatTextRise * dt;
+    }
+    this.count = n;
+  }
+
+  _swap(a, b) {
+    if (a === b) return;
+    this.x[a] = this.x[b];
+    this.y[a] = this.y[b];
+    this.value[a] = this.value[b];
+    this.life[a] = this.life[b];
+    this.maxLife[a] = this.maxLife[b];
+    this.tint[a] = this.tint[b];
+    this.crit[a] = this.crit[b];
+  }
+
+  clear() {
+    this.count = 0;
+  }
+}
+
+// ---- src/game/view.js --------------------------------------------------
+
+/**
+ * Translates simulation state into draw commands.
+ *
+ * Kept separate from both the world and the backend so that the simulation never
+ * learns what a sprite is and the backend never learns what an enemy is. This is
+ * also where render interpolation happens: every position is blended between the
+ * previous and current tick by `alpha`, which is what allows a 60 Hz simulation to
+ * look correct on a 144 Hz display.
+ */
+
+/** Health thresholds at which the player's corona changes colour. */
+const CRITICAL_HP = 0.35;
+
+/**
+ * @param {import('./world.js').World} world
+ * @param {import('../render/renderer.js').DrawList} list
+ * @param {import('../render/renderer.js').Camera} camera
+ * @param {number} alpha interpolation factor in [0,1]
+ * @param {import('../render/renderer.js').QualityController} quality
+ * @param {number} clock wall-clock seconds, for idle animation
+ * @param {boolean} reducedMotion
+ */
+function buildDrawList(world, list, camera, alpha, quality, clock, reducedMotion) {
+  list.reset();
+  const e = world.entities;
+
+  emitOrbs(e, list, camera, alpha, clock);
+  emitEnemies(e, list, camera, alpha);
+  emitPlayer(world, e, list, alpha, clock, reducedMotion);
+  emitProjectiles(e, list, camera, alpha);
+  emitParticles(world, list, camera, alpha, quality);
+  if (quality.showFloatText) emitFloatText(world, list, camera);
+}
+
+function lerpPos(prev, cur, alpha) {
+  return prev + (cur - prev) * alpha;
+}
+
+function emitOrbs(e, list, camera, alpha, clock) {
+  const ids = e.groups[KIND.ORB];
+  const n = e.groupCount[KIND.ORB];
+  for (let i = 0; i < n; i++) {
+    const id = ids[i];
+    const x = lerpPos(e.px[id], e.x[id], alpha);
+    const y = lerpPos(e.py[id], e.y[id], alpha);
+    if (!camera.isVisible(x, y)) continue;
+    // A slow bob and spin so a field of orbs reads as alive rather than as debris.
+    const bob = Math.sin(clock * 3 + id * 0.7) * 1.6;
+    const fade = e.ttl[id] < 3 ? clamp(e.ttl[id] / 3, 0.15, 1) : 1;
+    list.spriteCmd(LAYER.ORBS, SPRITE.ORB, x, y + bob, clock * 1.6 + id, e.scale[id], fade);
+  }
+}
+
+function emitEnemies(e, list, camera, alpha) {
+  const ids = e.groups[KIND.ENEMY];
+  const n = e.groupCount[KIND.ENEMY];
+  for (let i = 0; i < n; i++) {
+    const id = ids[i];
+    if ((e.flags[id] & FLAG.ALIVE) === 0) continue;
+    const x = lerpPos(e.px[id], e.x[id], alpha);
+    const y = lerpPos(e.py[id], e.y[id], alpha);
+    if (!camera.isVisible(x, y)) continue;
+
+    list.spriteCmd(LAYER.ENEMIES, e.sprite[id], x, y, e.rot[id], e.scale[id], 1);
+
+    // Hit flash as an additive dot rather than a tinted sprite: Canvas2D has no
+    // cheap tint, and a bright bloom at the impact point reads better than a
+    // recoloured silhouette anyway.
+    if (e.flash[id] > 0) {
+      list.dot(LAYER.PARTICLES, x, y, e.radius[id] * 0.95, TINT.BONE, clamp(e.flash[id] / 0.09, 0, 1) * 0.7);
+    }
+
+    const elite = (e.flags[id] & FLAG.ELITE) !== 0;
+    // Health rings only on elites and heavies. Putting one on every husk turns a
+    // crowd into unreadable noise, and a husk dies in two hits regardless.
+    if (elite || e.maxHp[id] > 60) {
+      const frac = clamp(e.hp[id] / e.maxHp[id], 0, 1);
+      const r = e.radius[id] + 6;
+      list.arc(LAYER.OVERLAY, x, y, r, -Math.PI / 2, -Math.PI / 2 + TAU, 2.5, TINT.COAL, 0.28);
+      if (frac > 0) {
+        list.arc(LAYER.OVERLAY, x, y, r, -Math.PI / 2, -Math.PI / 2 + TAU * frac, 2.5, elite ? TINT.BLOOD : TINT.QUENCH, 0.9);
+      }
+    }
+  }
+}
+
+function emitPlayer(world, e, list, alpha, clock, reducedMotion) {
+  const id = world.player;
+  if (!e.isAlive(id)) return;
+  const x = lerpPos(e.px[id], e.x[id], alpha);
+  const y = lerpPos(e.py[id], e.y[id], alpha);
+
+  // Pickup range, drawn faintly. The magnet radius is a real tactical decision
+  // once Lodestone is stacked, so it should be visible rather than guessed at.
+  const magnet = PLAYER.pickupRadius * world.stats.pickupRadiusMul;
+  list.arc(LAYER.OVERLAY, x, y, magnet, 0, TAU, 1.2, TINT.QUENCH, 0.09);
+
+  const iframe = e.flash[id];
+  let alphaOut = 1;
+  if (iframe > 0) {
+    // Blink during invulnerability so the state is legible. Under reduced motion
+    // the flicker is replaced by a constant dim, which conveys the same thing
+    // without a strobe.
+    alphaOut = reducedMotion ? 0.55 : 0.35 + 0.65 * Math.abs(Math.sin(iframe * 26));
+  }
+
+  const hpFrac = clamp(e.hp[id] / Math.max(1, world.maxHp), 0, 1);
+  const ringR = PLAYER.radius + 9;
+  // Signature element: health is diegetic. The corona is the player's own light,
+  // and it visibly cools as heat runs out, so the number in the HUD is a
+  // confirmation rather than the primary reading.
+  list.arc(LAYER.OVERLAY, x, y, ringR, 0, TAU, 3, TINT.COAL, 0.4);
+  if (hpFrac > 0) {
+    const tint = hpFrac <= CRITICAL_HP ? TINT.BLOOD : TINT.EMBER;
+    list.arc(LAYER.OVERLAY, x, y, ringR, -Math.PI / 2, -Math.PI / 2 + TAU * hpFrac, 3, tint, 0.95);
+  }
+
+  const pulse = reducedMotion ? 1 : 1 + Math.sin(clock * 4.5) * 0.045;
+  list.spriteCmd(LAYER.PLAYER, SPRITE.PLAYER, x, y, e.rot[id], pulse, alphaOut);
+}
+
+function emitProjectiles(e, list, camera, alpha) {
+  for (let pass = 0; pass < 2; pass++) {
+    const kind = pass === 0 ? KIND.BULLET : KIND.ENEMY_BULLET;
+    const ids = e.groups[kind];
+    const n = e.groupCount[kind];
+    for (let i = 0; i < n; i++) {
+      const id = ids[i];
+      if ((e.flags[id] & FLAG.ALIVE) === 0) continue;
+      const x = lerpPos(e.px[id], e.x[id], alpha);
+      const y = lerpPos(e.py[id], e.y[id], alpha);
+      if (!camera.isVisible(x, y)) continue;
+      list.spriteCmd(LAYER.PROJECTILES, e.sprite[id], x, y, e.rot[id], e.scale[id], 1);
+    }
+  }
+}
+
+function emitParticles(world, list, camera, alpha, quality) {
+  const p = world.particles;
+  // Particle order carries no meaning, so a prefix is a fair sample: dropping
+  // the tail under load thins every effect evenly instead of deleting one.
+  const budget = Math.floor(p.count * quality.particleFraction);
+  for (let i = 0; i < budget; i++) {
+    const x = lerpPos(p.px[i], p.x[i], alpha);
+    const y = lerpPos(p.py[i], p.y[i], alpha);
+    if (!camera.isVisible(x, y)) continue;
+    const t = p.life[i] / p.maxLife[i];
+    const fade = easeOutCubic(t);
+    list.dot(LAYER.PARTICLES, x, y, p.size[i] * (0.35 + 0.65 * t), p.tint[i], fade);
+  }
+}
+
+function emitFloatText(world, list, camera) {
+  const f = world.floaters;
+  for (let i = 0; i < f.count; i++) {
+    if (!camera.isVisible(f.x[i], f.y[i])) continue;
+    const t = f.life[i] / f.maxLife[i];
+    // Hold full opacity for the first third, then fade: numbers that start
+    // fading immediately are hard to read during a busy fight.
+    const fade = t > 0.66 ? 1 : t / 0.66;
+    list.text(LAYER.TEXT, f.x[i], f.y[i], f.value[i], f.tint[i], fade, f.crit[i] ? 1.15 : 1, f.crit[i] === 1);
+  }
+}
+
+// ---- src/core/spatialgrid.js -------------------------------------------
+
+/**
+ * Uniform-grid broadphase over a bounded arena, built as a CSR (compressed
+ * sparse row) layout by counting sort.
+ *
+ * Design history worth keeping: the first version used an array of per-cell
+ * JavaScript arrays, truncated with `length = 0` and refilled with `push`. That
+ * measured ~10 KB of allocation per tick, because V8 replaces the elements
+ * backing store when a packed array is truncated and then has to re-grow it. The
+ * result was a minor GC roughly every 100 ticks. This version preallocates every
+ * buffer at construction and performs literally zero allocation per build:
+ *
+ *   1. count entities per cell
+ *   2. prefix-sum the counts into per-cell start offsets
+ *   3. scatter entity ids into one flat items array
+ *
+ * The flat layout is also faster to query than the array-of-arrays it replaced,
+ * because a cell's candidates are contiguous in memory.
+ *
+ * Quadtrees were considered and rejected: collider radii and spatial density
+ * here are near-uniform, so a grid gives O(1) placement with no rebalancing, and
+ * a bounded arena means cells can be indexed directly instead of hashed.
+ */
+class SpatialGrid {
+  /**
+   * @param {number} cellSize world units per cell
+   * @param {number} half arena half-extent
+   * @param {number} capacity maximum entities in a single build
+   * @param {number} [pad] extra rings of cells, so entities that briefly leave
+   *   the arena (projectiles, knockback) still resolve to a real cell
+   */
+  constructor(cellSize, half, capacity, pad = 3) {
+    this.cellSize = cellSize;
+    this.invCell = 1 / cellSize;
+    this.origin = -(half + pad * cellSize);
+    const span = 2 * (half + pad * cellSize);
+    this.dim = Math.ceil(span * this.invCell);
+    this.cells = this.dim * this.dim;
+    this.capacity = capacity;
+
+    this.cellStart = new Int32Array(this.cells + 1);
+    this.cursor = new Int32Array(this.cells);
+    this.items = new Int32Array(capacity);
+    /** Cell index per input entry, cached between the count and scatter passes. */
+    this.itemCell = new Int32Array(capacity);
+    this.itemCount = 0;
+  }
+
+  /** @param {number} v world coordinate on either axis */
+  axisCell(v) {
+    const c = Math.floor((v - this.origin) * this.invCell);
+    return c < 0 ? 0 : c >= this.dim ? this.dim - 1 : c;
+  }
+
+  /** Empties the grid without touching the backing buffers. */
+  clear() {
+    this.itemCount = 0;
+    this.cellStart.fill(0);
+  }
+
+  /**
+   * Rebuilds from a dense id list. Entries beyond `capacity` are dropped rather
+   * than overflowing, which cannot happen in practice because capacity is the
+   * entity-store capacity.
+   *
+   * @param {Int32Array} ids dense entity ids
+   * @param {number} count how many leading entries are valid
+   * @param {Float32Array} xs position component array, indexed by entity id
+   * @param {Float32Array} ys
+   */
+  build(ids, count, xs, ys) {
+    const n = count > this.capacity ? this.capacity : count;
+    this.itemCount = n;
+    const start = this.cellStart;
+    const cells = this.cells;
+
+    start.fill(0);
+    // Pass 1: histogram. Counts are written at index+1 so the prefix sum below
+    // turns them into start offsets in place, with no second array.
+    for (let i = 0; i < n; i++) {
+      const id = ids[i];
+      const c = this.axisCell(ys[id]) * this.dim + this.axisCell(xs[id]);
+      this.itemCell[i] = c;
+      start[c + 1]++;
+    }
+    // Pass 2: prefix sum.
+    for (let c = 0; c < cells; c++) start[c + 1] += start[c];
+    // Pass 3: scatter.
+    this.cursor.set(start.subarray(0, cells));
+    for (let i = 0; i < n; i++) {
+      const c = this.itemCell[i];
+      this.items[this.cursor[c]++] = ids[i];
+    }
+  }
+
+  /**
+   * Collects candidate ids from every cell overlapping the query circle's
+   * bounding box. Callers must still run an exact distance test; this only
+   * rejects the far field.
+   * @param {number} x
+   * @param {number} y
+   * @param {number} radius
+   * @param {Int32Array} out destination buffer
+   * @returns {number} candidates written, never more than out.length
+   */
+  query(x, y, radius, out) {
+    const cap = out.length;
+    let n = 0;
+    if (this.itemCount === 0) return 0;
+    const x0 = this.axisCell(x - radius);
+    const x1 = this.axisCell(x + radius);
+    const y0 = this.axisCell(y - radius);
+    const y1 = this.axisCell(y + radius);
+    const start = this.cellStart;
+    const items = this.items;
+    for (let cy = y0; cy <= y1; cy++) {
+      const row = cy * this.dim;
+      // A cell row is contiguous in the CSR layout, so an entire span of cells
+      // can be copied as one range instead of iterated cell by cell.
+      const from = start[row + x0];
+      const to = start[row + x1 + 1];
+      for (let i = from; i < to; i++) {
+        if (n >= cap) return n;
+        out[n++] = items[i];
+      }
+    }
+    return n;
+  }
+}
+
+// ---- src/game/world.js -------------------------------------------------
+
+/** Candidate buffer for broadphase queries. Sized above the worst realistic cell occupancy. */
+const QUERY_CAP = 512;
+/** Cap on neighbours considered for separation, bounding the O(n*k) term. */
+const SEPARATION_NEIGHBOURS = 6;
+/** How far auto-aim will look for a target. */
+const TARGET_RANGE = 660;
+/** Hoisted: a literal here would allocate an array every tick. */
+const PROJECTILE_KINDS = Object.freeze([KIND.BULLET, KIND.ENEMY_BULLET]);
+
+/**
+ * The simulation.
+ *
+ * Contains no reference to the DOM, canvas, audio or input hardware: it takes a
+ * plain input snapshot and advances state. That is what makes it testable
+ * headlessly, deterministic under a seed, and replaceable behind a network layer
+ * later without touching a system.
+ *
+ * Presentation observes it two ways: pull (read the entity arrays each frame,
+ * see game/view.js) and push (subscribe to the event bus for one-shot cues).
+ */
+class World {
+  /**
+   * @param {object} [opts]
+   * @param {number} [opts.seed]
+   * @param {EventBus} [opts.bus]
+   */
+  constructor(opts = {}) {
+    this.bus = opts.bus ?? new EventBus();
+    this.rng = new Rng(opts.seed ?? 1);
+    this.entities = new EntityStore(LIMITS.maxEntities);
+    this.grid = new SpatialGrid(PHYS.cellSize, ARENA.half, LIMITS.maxEntities);
+    /** Compacted alive-enemy list handed to the broadphase each build. */
+    this._gridIds = new Int32Array(LIMITS.maxEntities);
+    this.particles = new ParticleSystem(LIMITS.maxParticles);
+    this.floaters = new FloatTextSystem(LIMITS.maxFloatText);
+
+    this._query = new Int32Array(QUERY_CAP);
+    this._weights = new Float64Array(ENEMY_TYPES.length);
+    this._choicePool = new Int32Array(UPGRADES.length);
+    this._choiceWeights = new Float64Array(UPGRADES.length);
+
+    /** Stack count per upgrade, parallel to UPGRADES. */
+    this.stacks = new Int32Array(UPGRADES.length);
+    /** @type {{index: number, level: number, cooldown: number}[]} */
+    this.weapons = [];
+    this.stats = computeStats(this.stacks);
+
+    /**
+     * Shared event payload. Reused rather than allocated because kill and hit
+     * cues fire hundreds of times a second; subscribers must read it during the
+     * dispatch and never retain it.
+     */
+    this.ev = { x: 0, y: 0, amount: 0, elite: false, typeId: 0, crit: false, level: 0 };
+
+    this.player = -1;
+    /** Half-diagonal of the visible area in world units; sets the spawn ring. */
+    this.viewHalfDiag = 520;
+
+    this.run = {
+      time: 0,
+      level: 1,
+      xp: 0,
+      xpNeeded: xpForLevel(1),
+      kills: 0,
+      damageDealt: 0,
+      damageTaken: 0,
+      /** Level-ups banked but not yet spent on a card. */
+      pendingLevelUps: 0,
+      over: false,
+      /** Set once, when the player dies. */
+      endTime: 0,
+    };
+
+    this._spawnBudget = 0;
+    /** Interpolated camera target; the renderer reads this, the sim owns it. */
+    this.focusX = 0;
+    this.focusY = 0;
+    this.shake = 0;
+
+    this.reset(opts.seed ?? 1);
+  }
+
+  // --------------------------------------------------------------------------
+  // Lifecycle
+  // --------------------------------------------------------------------------
+
+  /** @param {number} [seed] */
+  reset(seed) {
+    if (seed !== undefined) this.rng.seed(seed);
+    this.entities.reset();
+    this.particles.clear();
+    this.floaters.clear();
+    this.grid.clear();
+    this.stacks.fill(0);
+    this.weapons.length = 0;
+    this.stats = computeStats(this.stacks);
+    this._spawnBudget = 0;
+    this.shake = 0;
+
+    const r = this.run;
+    r.time = 0;
+    r.level = 1;
+    r.xp = 0;
+    r.xpNeeded = xpForLevel(1);
+    r.kills = 0;
+    r.damageDealt = 0;
+    r.damageTaken = 0;
+    r.pendingLevelUps = 0;
+    r.over = false;
+    r.endTime = 0;
+
+    const e = this.entities;
+    const id = e.create(KIND.PLAYER);
+    this.player = id;
+    e.place(id, 0, 0);
+    e.radius[id] = PLAYER.radius;
+    e.maxHp[id] = PLAYER.maxHp;
+    e.hp[id] = PLAYER.maxHp;
+    e.sprite[id] = SPRITE.PLAYER;
+    e.rot[id] = -Math.PI / 2;
+    e.cooldown[id] = 0;
+    this.focusX = 0;
+    this.focusY = 0;
+
+    this.grantWeapon('bolt');
+    this.bus.emit(EV.RUN_START, this.run);
+  }
+
+  /** @param {number} halfDiag world units from screen centre to a corner */
+  setViewExtent(halfDiag) {
+    this.viewHalfDiag = Math.max(160, halfDiag);
+  }
+
+  get maxHp() {
+    return PLAYER.maxHp + this.stats.maxHpBonus;
+  }
+
+  get hp() {
+    return this.entities.hp[this.player];
+  }
+
+  /** True while the simulation should be held for an upgrade choice. */
+  get awaitingUpgrade() {
+    return this.run.pendingLevelUps > 0;
+  }
+
+  // --------------------------------------------------------------------------
+  // Tick
+  // --------------------------------------------------------------------------
+
+  /**
+   * Advances one fixed step. Callers must not tick while `run.over` or
+   * `awaitingUpgrade` is set; both are gates the shell owns.
+   * @param {number} dt seconds, always SIM tick period
+   * @param {{moveX: number, moveY: number, aimX: number, aimY: number, aimActive: boolean}} input
+   */
+  tick(dt, input) {
+    if (this.run.over) return;
+    const e = this.entities;
+
+    e.snapshotTransforms();
+    this.run.time += dt;
+
+    this._updatePlayer(dt, input);
+    // Built from last tick's positions: separation and target acquisition both
+    // tolerate one frame of staleness, and rebuilding once here rather than per
+    // system keeps the cost at a single O(n) pass.
+    this._rebuildGrid();
+    this._fireWeapons(dt, input);
+    this._updateEnemies(dt);
+    this._integrateProjectiles(dt);
+    // Rebuilt against post-movement positions, because collision must not be
+    // stale: a darter covers ~2.2 units per tick and clipping through a
+    // projectile is the kind of bug players notice and cannot describe.
+    this._rebuildGrid();
+    this._collideProjectiles(dt);
+    this._collidePlayer(dt);
+    this._updateOrbs(dt);
+    this._runDirector(dt);
+
+    this.particles.update(dt);
+    this.floaters.update(dt);
+    // Exponential decay is frame-rate independent and cannot overshoot; the
+    // epsilon cut stops an asymptotic tail from jittering the camera forever.
+    this.shake *= Math.exp(-FX.shakeDecay * dt);
+    if (this.shake < 0.05) this.shake = 0;
+
+    e.flush();
+  }
+
+  _rebuildGrid() {
+    const e = this.entities;
+    const ids = e.groups[KIND.ENEMY];
+    const n = e.groupCount[KIND.ENEMY];
+    const live = this._gridIds;
+    let m = 0;
+    for (let i = 0; i < n; i++) {
+      const id = ids[i];
+      // Destruction is deferred to the tick boundary, so the group list can
+      // still contain entities killed earlier this tick. They must not occupy
+      // the broadphase or a bullet would spend its pierce on a corpse.
+      if ((e.flags[id] & FLAG.ALIVE) === 0) continue;
+      live[m++] = id;
+    }
+    // Compacting into a scratch buffer rather than passing a predicate keeps the
+    // grid free of callbacks, which matters: a megamorphic closure here would
+    // deoptimise the hottest loop in the frame.
+    this.grid.build(live, m, e.x, e.y);
+  }
+
+  // --------------------------------------------------------------------------
+  // Player
+  // --------------------------------------------------------------------------
+
+  _updatePlayer(dt, input) {
+    const e = this.entities;
+    const id = this.player;
+    const s = this.stats;
+
+    // `flash` doubles as the invulnerability clock: one timer means the visual
+    // blink and the actual immunity window can never disagree.
+    if (e.flash[id] > 0) e.flash[id] -= dt;
+
+    if (s.regen > 0 && e.hp[id] > 0) {
+      const cap = this.maxHp;
+      if (e.hp[id] < cap) e.hp[id] = Math.min(cap, e.hp[id] + s.regen * dt);
+    }
+
+    const maxV = PLAYER.speed * s.moveSpeedMul;
+    let mx = input.moveX;
+    let my = input.moveY;
+    const mag = len(mx, my);
+    if (mag > 1) {
+      // Normalise rather than clamp per axis, or diagonal input would be faster.
+      mx /= mag;
+      my /= mag;
+    }
+
+    const tvx = mx * maxV;
+    const tvy = my * maxV;
+    // Vector-space approach: per-axis approach would let a diagonal turn
+    // accelerate faster on one axis and visibly bend the path.
+    const rate = mag > 0.001 ? PLAYER.accel : PLAYER.friction * maxV;
+    let dvx = tvx - e.vx[id];
+    let dvy = tvy - e.vy[id];
+    const dv = len(dvx, dvy);
+    const step = rate * dt;
+    if (dv <= step || dv < 1e-5) {
+      e.vx[id] = tvx;
+      e.vy[id] = tvy;
+    } else {
+      e.vx[id] += (dvx / dv) * step;
+      e.vy[id] += (dvy / dv) * step;
+    }
+
+    e.x[id] += e.vx[id] * dt;
+    e.y[id] += e.vy[id] * dt;
+
+    const bound = ARENA.half - PLAYER.radius;
+    if (e.x[id] < -bound) { e.x[id] = -bound; e.vx[id] = 0; }
+    else if (e.x[id] > bound) { e.x[id] = bound; e.vx[id] = 0; }
+    if (e.y[id] < -bound) { e.y[id] = -bound; e.vy[id] = 0; }
+    else if (e.y[id] > bound) { e.y[id] = bound; e.vy[id] = 0; }
+
+    this.focusX = e.x[id];
+    this.focusY = e.y[id];
+
+    // Facing follows aim when the player is aiming, otherwise travel direction,
+    // otherwise it holds: snapping to a default angle on release looks broken.
+    if (input.aimActive && (input.aimX || input.aimY)) {
+      e.rot[id] = Math.atan2(input.aimY, input.aimX);
+    } else if (mag > 0.001) {
+      e.rot[id] = Math.atan2(my, mx);
+    }
+  }
+
+  _collidePlayer(dt) {
+    const e = this.entities;
+    const id = this.player;
+    if (e.hp[id] <= 0) return;
+
+    const px = e.x[id];
+    const py = e.y[id];
+    const reach = PLAYER.radius + MAX_ENEMY_RADIUS;
+    const n = this.grid.query(px, py, reach, this._query);
+
+    for (let i = 0; i < n; i++) {
+      const eid = this._query[i];
+      if (!e.isAlive(eid)) continue;
+      if (e.cooldown[eid] > 0) continue;
+      const r = PLAYER.radius + e.radius[eid];
+      if (dist2(px, py, e.x[eid], e.y[eid]) > r * r) continue;
+      const type = ENEMY_TYPES[e.typeId[eid]];
+      e.cooldown[eid] = type.contactCooldown;
+      this._hurtPlayer(e.damage[eid], e.x[eid], e.y[eid]);
+      if (this.run.over) return;
+    }
+
+    // Enemy projectiles are tested here rather than in their own pass so a
+    // single frame cannot deal both contact and projectile damage through iframes.
+    const bIds = e.groups[KIND.ENEMY_BULLET];
+    const bn = e.groupCount[KIND.ENEMY_BULLET];
+    for (let i = 0; i < bn; i++) {
+      const bid = bIds[i];
+      if (!e.isAlive(bid)) continue;
+      const r = PLAYER.radius + e.radius[bid];
+      if (dist2(px, py, e.x[bid], e.y[bid]) > r * r) continue;
+      e.destroy(bid);
+      this.particles.burst(this.rng, e.x[bid], e.y[bid], 5, 40, 150, 0.3, 3, TINT.COAL);
+      this._hurtPlayer(e.damage[bid], e.x[bid], e.y[bid]);
+      if (this.run.over) return;
+    }
+  }
+
+  _hurtPlayer(rawAmount, srcX, srcY) {
+    const e = this.entities;
+    const id = this.player;
+    if (e.flash[id] > 0 || this.run.over) return; // flash doubles as the iframe timer
+    // Armor is subtractive with a floor, so stacking it trivialises chip damage
+    // but never grants immunity to a bulwark.
+    const amount = Math.max(1, rawAmount - this.stats.armor);
+    e.hp[id] = Math.max(0, e.hp[id] - amount);
+    e.flash[id] = PLAYER.iframes;
+    this.run.damageTaken += amount;
+    this.shake = Math.min(24, this.shake + FX.shakeOnHurt);
+
+    const dx = e.x[id] - srcX;
+    const dy = e.y[id] - srcY;
+    const d = len(dx, dy) || 1;
+    this.particles.burst(this.rng, e.x[id], e.y[id], 10, 70, 240, 0.4, 4, TINT.BLOOD, dx / d, dy / d, 1.1);
+    this.floaters.spawn(e.x[id], e.y[id] - 18, -amount, TINT.BLOOD, false);
+
+    this.ev.x = e.x[id];
+    this.ev.y = e.y[id];
+    this.ev.amount = amount;
+    this.bus.emit(EV.PLAYER_HURT, this.ev);
+
+    if (e.hp[id] <= 0) this._endRun();
+  }
+
+  _endRun() {
+    if (this.run.over) return;
+    const e = this.entities;
+    const id = this.player;
+    this.run.over = true;
+    this.run.endTime = this.run.time;
+    this.particles.burst(this.rng, e.x[id], e.y[id], 48, 60, 420, 1.1, 7, TINT.EMBER);
+    this.shake = 24;
+    this.bus.emit(EV.RUN_END, this.run);
+  }
+
+  // --------------------------------------------------------------------------
+  // Weapons
+  // --------------------------------------------------------------------------
+
+  /** @param {string} key @returns {boolean} false if already owned */
+  grantWeapon(key) {
+    const index = WEAPON_BY_KEY[key];
+    if (index === undefined) return false;
+    if (this.weapons.some((w) => w.index === index)) return false;
+    this.weapons.push({ index, level: 1, cooldown: 0 });
+    this.bus.emit(EV.WEAPON_GAINED, WEAPONS[index]);
+    return true;
+  }
+
+  ownsWeapon(key) {
+    const index = WEAPON_BY_KEY[key];
+    return index !== undefined && this.weapons.some((w) => w.index === index);
+  }
+
+  weaponLevel(key) {
+    const index = WEAPON_BY_KEY[key];
+    const w = this.weapons.find((s) => s.index === index);
+    return w ? w.level : 0;
+  }
+
+  _fireWeapons(dt, input) {
+    const s = this.stats;
+    for (let i = 0; i < this.weapons.length; i++) {
+      const slot = this.weapons[i];
+      slot.cooldown -= dt;
+      // Bounded catch-up: a very short cooldown must not fire an unbounded
+      // number of times in one tick, which would spike allocation and audio.
+      let shots = 0;
+      while (slot.cooldown <= 0 && shots < 3) {
+        const cd = weaponCooldown(slot.index, slot.level) / Math.max(0.05, s.fireRateMul);
+        slot.cooldown += cd;
+        this._fireWeapon(slot, input);
+        shots++;
+      }
+      if (slot.cooldown < 0) slot.cooldown = 0;
+    }
+  }
+
+  _fireWeapon(slot, input) {
+    const e = this.entities;
+    const pid = this.player;
+    const def = WEAPONS[slot.index];
+    const s = this.stats;
+    const px = e.x[pid];
+    const py = e.y[pid];
+
+    let dirX = Math.cos(e.rot[pid]);
+    let dirY = Math.sin(e.rot[pid]);
+    if (!input.aimActive) {
+      const target = this._nearestEnemy(px, py, TARGET_RANGE);
+      if (target !== -1) {
+        const dx = e.x[target] - px;
+        const dy = e.y[target] - py;
+        const d = len(dx, dy) || 1;
+        dirX = dx / d;
+        dirY = dy / d;
+        e.rot[pid] = Math.atan2(dirY, dirX);
+      }
+    }
+
+    const damage = weaponDamage(slot.index, slot.level) * s.damageMul;
+
+    if (def.pattern === PATTERN.SWEEP) {
+      this._fireSweep(slot, def, px, py, dirX, dirY, damage);
+      this.bus.emit(EV.SHOT_FIRED, def);
+      return;
+    }
+
+    const count = weaponCount(slot.index, slot.level) + (def.pattern === PATTERN.AIMED ? s.extraProjectiles : 0);
+    const speed = PROJECTILE.speed * def.speed * s.projectileSpeedMul;
+    const pierce = def.pierce + s.extraPierce;
+    const baseAngle = Math.atan2(dirY, dirX);
+
+    for (let i = 0; i < count; i++) {
+      let angle;
+      if (def.pattern === PATTERN.RADIAL) {
+        // Rotate the ring by the run clock so successive bursts do not stack
+        // into identical spoke patterns.
+        angle = baseAngle + (i / count) * TAU + this.run.time * 0.9;
+      } else {
+        const offset = count === 1 ? 0 : (i - (count - 1) / 2) * def.spread;
+        angle = baseAngle + offset;
+      }
+      this._spawnBullet(px, py, angle, speed, damage, pierce, def, slot.level);
+    }
+    this.bus.emit(EV.SHOT_FIRED, def);
+  }
+
+  _spawnBullet(x, y, angle, speed, damage, pierce, def, level) {
+    const e = this.entities;
+    const id = e.create(KIND.BULLET);
+    if (id === -1) return -1;
+    const r = weaponRadius(WEAPON_BY_KEY[def.key], level);
+    e.place(id, x + Math.cos(angle) * 10, y + Math.sin(angle) * 10);
+    e.vx[id] = Math.cos(angle) * speed;
+    e.vy[id] = Math.sin(angle) * speed;
+    e.rot[id] = angle;
+    e.radius[id] = def.pattern === PATTERN.SWEEP ? PROJECTILE.radius : r;
+    e.damage[id] = damage;
+    e.pierce[id] = pierce;
+    e.ttl[id] = def.ttl;
+    e.sprite[id] = def.sprite;
+    e.scale[id] = 1;
+    return id;
+  }
+
+  _fireSweep(slot, def, px, py, dirX, dirY, damage) {
+    const e = this.entities;
+    const reach = weaponRadius(slot.index, slot.level);
+    const halfAngle = def.spread;
+    const baseAngle = Math.atan2(dirY, dirX);
+    const n = this.grid.query(px, py, reach + MAX_ENEMY_RADIUS, this._query);
+    let hits = 0;
+    for (let i = 0; i < n; i++) {
+      const eid = this._query[i];
+      if (!e.isAlive(eid)) continue;
+      const dx = e.x[eid] - px;
+      const dy = e.y[eid] - py;
+      const rr = reach + e.radius[eid];
+      if (dx * dx + dy * dy > rr * rr) continue;
+      // Angular test uses a dot product against the facing vector: cheaper than
+      // atan2 per candidate and free of seam handling.
+      const d = len(dx, dy) || 1;
+      const dot = (dx / d) * dirX + (dy / d) * dirY;
+      if (dot < Math.cos(halfAngle)) continue;
+      this._damageEnemy(eid, damage, px, py);
+      hits++;
+    }
+    // The arc is drawn from particles, so it reads identically at any zoom and
+    // needs no extra sprite or shader.
+    const arcParticles = 16;
+    for (let i = 0; i < arcParticles; i++) {
+      const a = baseAngle + (i / (arcParticles - 1) - 0.5) * halfAngle * 2;
+      const rad = reach * this.rng.float(0.72, 1);
+      this.particles.spawn(
+        px + Math.cos(a) * rad,
+        py + Math.sin(a) * rad,
+        Math.cos(a) * 60,
+        Math.sin(a) * 60,
+        this.rng.float(0.14, 0.26),
+        this.rng.float(3, 6),
+        TINT.QUENCH,
+        9
+      );
+    }
+    if (hits > 0) this.shake = Math.min(24, this.shake + 1.4);
+  }
+
+  /** @returns {number} entity id or -1 */
+  _nearestEnemy(x, y, range) {
+    const e = this.entities;
+    const n = this.grid.query(x, y, range, this._query);
+    let best = -1;
+    let bestD = range * range;
+    for (let i = 0; i < n; i++) {
+      const id = this._query[i];
+      if (!e.isAlive(id)) continue;
+      const d = dist2(x, y, e.x[id], e.y[id]);
+      if (d < bestD) {
+        bestD = d;
+        best = id;
+      }
+    }
+    return best;
+  }
+
+  // --------------------------------------------------------------------------
+  // Enemies
+  // --------------------------------------------------------------------------
+
+  _updateEnemies(dt) {
+    const e = this.entities;
+    const pid = this.player;
+    const px = e.x[pid];
+    const py = e.y[pid];
+    const ids = e.groups[KIND.ENEMY];
+    const n = e.groupCount[KIND.ENEMY];
+    const bound = ARENA.half;
+
+    for (let i = 0; i < n; i++) {
+      const id = ids[i];
+      if ((e.flags[id] & FLAG.ALIVE) === 0) continue;
+      const type = ENEMY_TYPES[e.typeId[id]];
+      if (e.cooldown[id] > 0) e.cooldown[id] -= dt;
+      if (e.flash[id] > 0) e.flash[id] -= dt;
+      e.phase[id] += dt;
+
+      const dx = px - e.x[id];
+      const dy = py - e.y[id];
+      const dist = len(dx, dy) || 1;
+      const nx = dx / dist;
+      const ny = dy / dist;
+      const speed = e.speed[id];
+      let vx = 0;
+      let vy = 0;
+
+      switch (type.behavior) {
+        case BEHAVIOR.DARTER: {
+          // Lateral oscillation makes darters hard to lead without making them
+          // dodge deterministically: the phase is seeded per entity on spawn.
+          const wobble = Math.sin(e.phase[id] * 7.5) * 0.62;
+          vx = (nx - ny * wobble) * speed;
+          vy = (ny + nx * wobble) * speed;
+          break;
+        }
+        case BEHAVIOR.SPITTER: {
+          const R = type.range;
+          let drive = 0;
+          if (dist < R.tooClose) drive = -1;
+          else if (dist > R.tooFar) drive = 1;
+          vx = nx * speed * drive;
+          vy = ny * speed * drive;
+          // Strafe so a kiting spitter is not a stationary target.
+          const strafe = Math.sin(e.phase[id] * 1.6) * 0.55;
+          vx += -ny * speed * strafe;
+          vy += nx * speed * strafe;
+          if (e.ttl[id] > 0) e.ttl[id] -= dt;
+          if (e.ttl[id] <= 0 && dist < R.fire) {
+            e.ttl[id] = type.reload;
+            this._spawnEnemyBullet(e.x[id], e.y[id], nx, ny, type);
+          }
+          break;
+        }
+        case BEHAVIOR.BULWARK:
+        case BEHAVIOR.CHASE:
+        default:
+          vx = nx * speed;
+          vy = ny * speed;
+          break;
+      }
+
+      // Separation keeps a crowd readable: without it 200 chasers collapse into
+      // one opaque blob occupying a single collider's worth of space.
+      const sepR = e.radius[id] * 2.1;
+      const qn = this.grid.query(e.x[id], e.y[id], sepR, this._query);
+      let sx = 0;
+      let sy = 0;
+      let considered = 0;
+      for (let k = 0; k < qn && considered < SEPARATION_NEIGHBOURS; k++) {
+        const other = this._query[k];
+        if (other === id || !e.isAlive(other)) continue;
+        const ox = e.x[id] - e.x[other];
+        const oy = e.y[id] - e.y[other];
+        const minD = e.radius[id] + e.radius[other];
+        const d2 = ox * ox + oy * oy;
+        if (d2 >= minD * minD || d2 < 1e-6) continue;
+        const d = Math.sqrt(d2);
+        const push = (minD - d) / minD;
+        sx += (ox / d) * push;
+        sy += (oy / d) * push;
+        considered++;
+      }
+      if (considered > 0) {
+        vx += sx * speed * 1.35;
+        vy += sy * speed * 1.35;
+      }
+
+      e.vx[id] = vx;
+      e.vy[id] = vy;
+      e.x[id] += vx * dt;
+      e.y[id] += vy * dt;
+      e.rot[id] = Math.atan2(ny, nx);
+
+      if (e.x[id] < -bound) e.x[id] = -bound;
+      else if (e.x[id] > bound) e.x[id] = bound;
+      if (e.y[id] < -bound) e.y[id] = -bound;
+      else if (e.y[id] > bound) e.y[id] = bound;
+    }
+  }
+
+  _spawnEnemyBullet(x, y, nx, ny, type) {
+    const e = this.entities;
+    const id = e.create(KIND.ENEMY_BULLET);
+    if (id === -1) return;
+    e.place(id, x + nx * 14, y + ny * 14);
+    e.vx[id] = nx * type.shotSpeed;
+    e.vy[id] = ny * type.shotSpeed;
+    e.rot[id] = Math.atan2(ny, nx);
+    e.radius[id] = 6;
+    e.damage[id] = type.shotDamage;
+    e.ttl[id] = 3.2;
+    e.sprite[id] = SPRITE.ENEMY_BOLT;
+  }
+
+  _damageEnemy(id, amount, srcX, srcY) {
+    const e = this.entities;
+    const crit = this.stats.critChance > 0 && this.rng.chance(this.stats.critChance);
+    const dealt = crit ? amount * PLAYER.critMultiplier : amount;
+    e.hp[id] -= dealt;
+    e.flash[id] = 0.09;
+    this.run.damageDealt += dealt;
+    this.floaters.spawn(e.x[id], e.y[id] - e.radius[id], Math.round(dealt), crit ? TINT.BONE : TINT.EMBER, crit);
+
+    const dx = e.x[id] - srcX;
+    const dy = e.y[id] - srcY;
+    const d = len(dx, dy) || 1;
+    this.particles.burst(this.rng, e.x[id], e.y[id], FX.hitSparks, 40, 190, 0.3, 3.4, TINT.EMBER, dx / d, dy / d, 0.9);
+
+    this.ev.x = e.x[id];
+    this.ev.y = e.y[id];
+    this.ev.amount = dealt;
+    this.ev.crit = crit;
+    this.ev.typeId = e.typeId[id];
+    this.ev.elite = (e.flags[id] & FLAG.ELITE) !== 0;
+    this.bus.emit(EV.ENEMY_HIT, this.ev);
+
+    if (e.hp[id] <= 0) this._killEnemy(id);
+  }
+
+  _killEnemy(id) {
+    const e = this.entities;
+    if (!e.isAlive(id)) return;
+    const elite = (e.flags[id] & FLAG.ELITE) !== 0;
+    const x = e.x[id];
+    const y = e.y[id];
+    e.destroy(id);
+    this.run.kills++;
+
+    this.particles.burst(this.rng, x, y, elite ? FX.killSparks * 3 : FX.killSparks, 50, 300, 0.5, elite ? 6 : 4.4, elite ? TINT.COAL : TINT.EMBER);
+    this.shake = Math.min(24, this.shake + (elite ? FX.shakeOnElite : FX.shakeOnKill));
+
+    this._spawnOrb(x, y, e.xpValue[id]);
+
+    this.ev.x = x;
+    this.ev.y = y;
+    this.ev.elite = elite;
+    this.ev.typeId = e.typeId[id];
+    this.bus.emit(EV.ENEMY_KILLED, this.ev);
+  }
+
+  _spawnOrb(x, y, value) {
+    const e = this.entities;
+    const id = e.create(KIND.ORB);
+    if (id === -1) return;
+    const a = this.rng.angle();
+    const sp = this.rng.float(20, 70);
+    e.place(id, x, y);
+    e.vx[id] = Math.cos(a) * sp;
+    e.vy[id] = Math.sin(a) * sp;
+    e.radius[id] = 7;
+    e.xpValue[id] = value;
+    e.ttl[id] = XP.orbLifetime;
+    e.sprite[id] = SPRITE.ORB;
+    e.scale[id] = value >= 6 ? 1.5 : 1;
+  }
+
+  // --------------------------------------------------------------------------
+  // Projectiles
+  // --------------------------------------------------------------------------
+
+  _integrateProjectiles(dt) {
+    const e = this.entities;
+    const bound = ARENA.half + 40;
+    for (let ki = 0; ki < PROJECTILE_KINDS.length; ki++) {
+      const kind = PROJECTILE_KINDS[ki];
+      const ids = e.groups[kind];
+      const n = e.groupCount[kind];
+      for (let i = 0; i < n; i++) {
+        const id = ids[i];
+        if ((e.flags[id] & FLAG.ALIVE) === 0) continue;
+        e.ttl[id] -= dt;
+        if (e.cooldown[id] > 0) e.cooldown[id] -= dt;
+        if (e.ttl[id] <= 0) {
+          e.destroy(id);
+          continue;
+        }
+        e.x[id] += e.vx[id] * dt;
+        e.y[id] += e.vy[id] * dt;
+        if (e.x[id] < -bound || e.x[id] > bound || e.y[id] < -bound || e.y[id] > bound) e.destroy(id);
+      }
+    }
+  }
+
+  _collideProjectiles(dt) {
+    const e = this.entities;
+    const ids = e.groups[KIND.BULLET];
+    const n = e.groupCount[KIND.BULLET];
+
+    for (let i = 0; i < n; i++) {
+      const bid = ids[i];
+      if (!e.isAlive(bid)) continue;
+      const bx = e.x[bid];
+      const by = e.y[bid];
+      const br = e.radius[bid];
+      const qn = this.grid.query(bx, by, br + MAX_ENEMY_RADIUS, this._query);
+
+      for (let k = 0; k < qn; k++) {
+        const eid = this._query[k];
+        if (!e.isAlive(eid)) continue;
+        // Generation check: without it a piercing bullet's "already hit" lock
+        // could suppress a legitimate hit on a different enemy that recycled
+        // the same slot within the re-hit window.
+        if (e.lastHit[bid] === eid && e.lastHitGen[bid] === e.gen[eid] && e.cooldown[bid] > 0) continue;
+        const r = br + e.radius[eid];
+        if (dist2(bx, by, e.x[eid], e.y[eid]) > r * r) continue;
+
+        this._damageEnemy(eid, e.damage[bid], bx, by);
+
+        if (e.pierce[bid] > 0) {
+          e.pierce[bid] -= 1;
+          e.lastHit[bid] = eid;
+          e.lastHitGen[bid] = e.gen[eid];
+          e.cooldown[bid] = PROJECTILE.rehitDelay;
+        } else {
+          e.destroy(bid);
+          break;
+        }
+      }
+    }
+  }
+
+  // --------------------------------------------------------------------------
+  // Pickups and progression
+  // --------------------------------------------------------------------------
+
+  _updateOrbs(dt) {
+    const e = this.entities;
+    this._capOrbs();
+    const pid = this.player;
+    const px = e.x[pid];
+    const py = e.y[pid];
+    const magnet = PLAYER.pickupRadius * this.stats.pickupRadiusMul;
+    const magnet2 = magnet * magnet;
+    const ids = e.groups[KIND.ORB];
+    const n = e.groupCount[KIND.ORB];
+
+    for (let i = 0; i < n; i++) {
+      const id = ids[i];
+      // Skipping the already-dead is not defensive padding: _capOrbs may have
+      // credited and destroyed an orb moments ago, and without this guard an orb
+      // sitting inside pickup range would be paid out a second time.
+      if ((e.flags[id] & FLAG.ALIVE) === 0) continue;
+      e.ttl[id] -= dt;
+      if (e.ttl[id] <= 0) {
+        e.destroy(id);
+        continue;
+      }
+      const dx = px - e.x[id];
+      const dy = py - e.y[id];
+      const d2 = dx * dx + dy * dy;
+
+      if (d2 < magnet2) {
+        const d = Math.sqrt(d2) || 1;
+        // Acceleration rather than a fixed speed, so orbs stream in with a
+        // sense of mass instead of teleporting the moment they enter range.
+        e.vx[id] += (dx / d) * PLAYER.magnetAccel * dt;
+        e.vy[id] += (dy / d) * PLAYER.magnetAccel * dt;
+      } else {
+        // Outside pickup range orbs still converge, slowly. Without this the
+        // player physically cannot reach everything a saturated field drops and
+        // a third of all experience expires on the floor.
+        const d = Math.sqrt(d2) || 1;
+        const tvx = (dx / d) * PLAYER.orbDriftSpeed;
+        const tvy = (dy / d) * PLAYER.orbDriftSpeed;
+        const k = Math.exp(-PLAYER.orbDriftDamp * dt);
+        e.vx[id] = tvx + (e.vx[id] - tvx) * k;
+        e.vy[id] = tvy + (e.vy[id] - tvy) * k;
+      }
+
+      e.x[id] += e.vx[id] * dt;
+      e.y[id] += e.vy[id] * dt;
+
+      const pick = PLAYER.radius + e.radius[id];
+      if (d2 < pick * pick) {
+        const value = e.xpValue[id];
+        const ox = e.x[id];
+        const oy = e.y[id];
+        e.destroy(id);
+        this._collectXp(value, ox, oy);
+      }
+    }
+  }
+
+  /**
+   * Enforces the orb ceiling by crediting the excess directly. Deleting them
+   * would silently delete progression the player earned; crediting them keeps
+   * the economy exact while bounding entity count and broadphase work.
+   */
+  _capOrbs() {
+    const e = this.entities;
+    const ids = e.groups[KIND.ORB];
+    const total = e.groupCount[KIND.ORB];
+    // Destruction is deferred to the tick boundary, so the group list still
+    // holds orbs killed earlier this tick. Counting the list rather than the
+    // living entities would under-report and let the ceiling drift upward.
+    let live = 0;
+    for (let i = 0; i < total; i++) if (e.isAlive(ids[i])) live++;
+    let excess = live - LIMITS.maxOrbs;
+    if (excess <= 0) return;
+    for (let i = 0; i < total && excess > 0; i++) {
+      const id = ids[i];
+      if (!e.isAlive(id)) continue;
+      const value = e.xpValue[id];
+      const x = e.x[id];
+      const y = e.y[id];
+      e.destroy(id);
+      this._collectXp(value, x, y);
+      excess--;
+    }
+  }
+
+  _collectXp(value, x, y) {
+    const gained = value * this.stats.xpMul;
+    this.run.xp += gained;
+    this.ev.x = x;
+    this.ev.y = y;
+    this.ev.amount = gained;
+    this.bus.emit(EV.XP_COLLECTED, this.ev);
+
+    // A while loop, not an if: a late-game orb worth 36 XP can legitimately
+    // clear two or three thresholds at once, and each owes the player a card.
+    while (this.run.xp >= this.run.xpNeeded) {
+      this.run.xp -= this.run.xpNeeded;
+      this.run.level += 1;
+      this.run.xpNeeded = xpForLevel(this.run.level);
+      this.run.pendingLevelUps += 1;
+      this.ev.level = this.run.level;
+      this.bus.emit(EV.LEVEL_UP, this.ev);
+    }
+  }
+
+  /**
+   * Picks `count` distinct, currently-legal upgrades. Returns fewer than
+   * requested only when the catalogue genuinely has fewer available, which is
+   * why the caller must render from the returned length rather than assume 3.
+   * @param {number} count
+   * @returns {number[]} upgrade indices
+   */
+  rollUpgradeChoices(count) {
+    const ctx = {
+      ownsWeapon: (k) => this.ownsWeapon(k),
+      weaponLevel: (k) => this.weaponLevel(k),
+      stacks: (k) => this.stacks[UPGRADE_BY_KEY[k]] | 0,
+      level: this.run.level,
+    };
+    let poolSize = 0;
+    for (let i = 0; i < UPGRADES.length; i++) {
+      const u = UPGRADES[i];
+      if (this.stacks[i] >= u.max) continue;
+      if (u.levelWeapon && !this.ownsWeapon(u.levelWeapon)) continue;
+      if (u.available && !u.available(ctx)) continue;
+      this._choicePool[poolSize] = i;
+      this._choiceWeights[poolSize] = u.weight;
+      poolSize++;
+    }
+
+    /** @type {number[]} */
+    const out = [];
+    for (let n = 0; n < count && poolSize > 0; n++) {
+      const pick = this.rng.weightedIndex(this._choiceWeights, poolSize);
+      if (pick === -1) break;
+      out.push(this._choicePool[pick]);
+      // Swap-remove from the candidate pool so one roll cannot offer duplicates.
+      poolSize--;
+      this._choicePool[pick] = this._choicePool[poolSize];
+      this._choiceWeights[pick] = this._choiceWeights[poolSize];
+    }
+    return out;
+  }
+
+  /**
+   * Consumes one banked level-up.
+   * @param {number} index into UPGRADES
+   * @returns {boolean} whether it applied
+   */
+  applyUpgrade(index) {
+    if (this.run.pendingLevelUps <= 0) return false;
+    const u = UPGRADES[index];
+    if (!u) return false;
+    if (this.stacks[index] >= u.max) return false;
+
+    this.stacks[index] += 1;
+    this.run.pendingLevelUps -= 1;
+
+    if (u.grantWeapon) this.grantWeapon(u.grantWeapon);
+    if (u.levelWeapon) {
+      const wi = WEAPON_BY_KEY[u.levelWeapon];
+      const slot = this.weapons.find((w) => w.index === wi);
+      if (slot) slot.level += 1;
+    }
+
+    const previousMax = this.maxHp;
+    this.stats = computeStats(this.stacks);
+    const e = this.entities;
+    // Max-HP increases grant the delta as current HP too, otherwise "+20 max"
+    // reads as a downgrade at low health.
+    const grew = this.maxHp - previousMax;
+    if (grew > 0) e.hp[this.player] = Math.min(this.maxHp, e.hp[this.player] + grew);
+    if (u.heals) {
+      e.hp[this.player] = Math.min(this.maxHp, e.hp[this.player] + u.heals);
+      this.bus.emit(EV.PLAYER_HEALED, this.ev);
+    }
+    e.maxHp[this.player] = this.maxHp;
+
+    this.bus.emit(EV.UPGRADE_PICKED, u);
+    return true;
+  }
+
+  // --------------------------------------------------------------------------
+  // Spawn director
+  // --------------------------------------------------------------------------
+
+  /** Run progress in [0,1]; every difficulty curve is a function of this. */
+  get ramp() {
+    return clamp(this.run.time / DIRECTOR.rampSeconds, 0, 1);
+  }
+
+  _runDirector(dt) {
+    const e = this.entities;
+    const t = this.ramp;
+    // Base rate ramps super-linearly, with a slow sine so pressure arrives in
+    // waves; a flat rate reads as static noise rather than escalating threat.
+    const pulse = 1 + 0.35 * Math.sin(this.run.time * 0.28);
+    const rate = (1.15 + 9 * Math.pow(t, 1.35)) * pulse;
+    this._spawnBudget += rate * dt;
+
+    const alive = e.groupCount[KIND.ENEMY];
+    if (alive >= LIMITS.maxEnemies) {
+      // Hold the budget at a small positive value instead of accumulating: on
+      // return from a saturated field, a large debt would dump 200 enemies at once.
+      this._spawnBudget = Math.min(this._spawnBudget, 2);
+      return;
+    }
+
+    let guard = 0;
+    while (this._spawnBudget >= 1 && e.groupCount[KIND.ENEMY] < LIMITS.maxEnemies && guard < 40) {
+      this._spawnBudget -= 1;
+      guard++;
+      this._spawnOne(t);
+    }
+  }
+
+  _spawnOne(t) {
+    const e = this.entities;
+    let count = 0;
+    for (let i = 0; i < ENEMY_TYPES.length; i++) {
+      const w = ENEMY_TYPES[i].weight(t);
+      this._weights[i] = w > 0 ? w : 0;
+      count++;
+    }
+    const pick = this.rng.weightedIndex(this._weights, count);
+    if (pick === -1) return;
+    const type = ENEMY_TYPES[pick];
+
+    const dist = Math.max(DIRECTOR.minSpawnDistance, this.viewHalfDiag * DIRECTOR.spawnRingScale);
+    const px = e.x[this.player];
+    const py = e.y[this.player];
+    const bound = ARENA.half - type.radius * type.scale;
+
+    // Try a handful of angles so a player pinned in a corner does not get
+    // enemies materialising on top of them after the arena clamp.
+    let sx = px;
+    let sy = py;
+    let ok = false;
+    for (let attempt = 0; attempt < 8; attempt++) {
+      const a = this.rng.angle();
+      const cx = clamp(px + Math.cos(a) * dist, -bound, bound);
+      const cy = clamp(py + Math.sin(a) * dist, -bound, bound);
+      sx = cx;
+      sy = cy;
+      if (dist2(px, py, cx, cy) >= (dist * 0.72) * (dist * 0.72)) {
+        ok = true;
+        break;
+      }
+    }
+    if (!ok) {
+      // Fallback: the far side of the arena from the player, which is always
+      // legal and always off screen.
+      sx = clamp(-px * 0.9, -bound, bound);
+      sy = clamp(-py * 0.9, -bound, bound);
+    }
+
+    const id = e.create(KIND.ENEMY);
+    if (id === -1) return;
+    const elite = this.rng.chance(DIRECTOR.maxEliteChance * t);
+    // Health scales quadratically and speed only mildly: making late enemies
+    // fast makes them unavoidable, making them tanky makes them a DPS check.
+    const hpScale = 1 + 1.3 * t + 1.7 * t * t;
+    const speedScale = 1 + 0.24 * t;
+
+    e.place(id, sx, sy);
+    e.typeId[id] = pick;
+    e.sprite[id] = type.sprite;
+    e.radius[id] = type.radius * type.scale * (elite ? DIRECTOR.eliteScaleUp : 1);
+    e.scale[id] = type.scale * (elite ? DIRECTOR.eliteScaleUp : 1);
+    e.maxHp[id] = type.hp * hpScale * (elite ? DIRECTOR.eliteHpScale : 1);
+    e.hp[id] = e.maxHp[id];
+    e.speed[id] = type.speed * speedScale * (elite ? DIRECTOR.eliteSpeedScale : 1);
+    e.damage[id] = type.damage * (elite ? 1.5 : 1);
+    e.xpValue[id] = type.xp * (elite ? DIRECTOR.eliteXpScale : 1);
+    e.flags[id] = FLAG.ALIVE | (elite ? FLAG.ELITE : 0);
+    // Randomised phase so a cohort spawned on the same tick does not oscillate
+    // in lockstep, which reads as a single organism rather than a crowd.
+    e.phase[id] = this.rng.float(0, 10);
+    e.ttl[id] = type.reload ? this.rng.float(0.4, type.reload) : 0;
+  }
+
+  // --------------------------------------------------------------------------
+  // Diagnostics
+  // --------------------------------------------------------------------------
+
+  /**
+   * FNV-1a over quantised state. Used by the determinism test: two runs with the
+   * same seed and inputs must agree here at every tick.
+   */
+  hash() {
+    const e = this.entities;
+    let h = 0x811c9dc5;
+    const mix = (v) => {
+      h ^= v | 0;
+      h = Math.imul(h, 0x01000193) >>> 0;
+    };
+    mix(this.rng.state);
+    mix(this.run.kills);
+    mix(this.run.level);
+    mix(Math.round(this.run.xp * 100));
+    mix(Math.round(this.run.time * 1000));
+    for (let k = 0; k < KIND.COUNT; k++) {
+      const ids = e.groups[k];
+      const n = e.groupCount[k];
+      mix(n);
+      for (let i = 0; i < n; i++) {
+        const id = ids[i];
+        mix(Math.round(e.x[id] * 32));
+        mix(Math.round(e.y[id] * 32));
+        mix(Math.round(e.hp[id] * 16));
+      }
+    }
+    return h >>> 0;
+  }
+}
+
+// ---- src/input/input.js ------------------------------------------------
+
+/**
+ * Unified input abstraction over keyboard, mouse, touch and gamepad.
+ *
+ * Every source resolves to one snapshot the simulation consumes, so gameplay has
+ * no idea which device produced a movement vector. Adding a new source means
+ * writing into `state` and nothing else.
+ *
+ * Two decisions worth stating:
+ *  - Edge-triggered actions (pause, confirm, card selection) are latched and
+ *    cleared explicitly at the end of each frame. Reading them directly from a
+ *    keydown handler would drop inputs that arrive between frames, which is
+ *    exactly the sort of dropped-menu-press that feels like a broken game.
+ *  - Pointer Events are used rather than separate mouse and touch handlers, and
+ *    the branch is on `pointerType`. Touch drives a relative virtual stick;
+ *    mouse and pen drive aim. That keeps a laptop with a touchscreen coherent
+ *    instead of fighting itself.
+ */
+class InputManager {
+  /** @param {HTMLElement} surface element that receives pointer input */
+  constructor(surface) {
+    this.surface = surface;
+
+    /** Snapshot handed to the simulation. Mutated in place; never reallocated. */
+    this.state = { moveX: 0, moveY: 0, aimX: 1, aimY: 0, aimActive: false };
+
+    /** Edge-triggered actions, cleared by endFrame(). */
+    this.actions = { pause: false, confirm: false, cancel: false, restart: false, debug: false, mute: false };
+    /** Card index chosen this frame via number keys, or -1. */
+    this.choice = -1;
+    /** Menu navigation deltas, edge-triggered. */
+    this.navX = 0;
+    this.navY = 0;
+
+    this._keys = new Set();
+    /** Pointer in CSS pixels relative to the surface, or null when absent. */
+    this.pointer = null;
+    this.hasTouch = false;
+    this.hasGamepad = false;
+
+    this._touchId = -1;
+    this._touchOriginX = 0;
+    this._touchOriginY = 0;
+    this._touchX = 0;
+    this._touchY = 0;
+
+    this._padButtons = [];
+    this._bound = false;
+    this._handlers = [];
+  }
+
+  attach() {
+    if (this._bound) return;
+    this._bound = true;
+    const on = (target, type, fn, opts) => {
+      target.addEventListener(type, fn, opts);
+      this._handlers.push([target, type, fn, opts]);
+    };
+
+    on(window, 'keydown', this._onKeyDown = (ev) => this._keyDown(ev), { passive: false });
+    on(window, 'keyup', this._onKeyUp = (ev) => this._keyUp(ev));
+    // A lost window must not leave a key latched on; otherwise the player
+    // returns to the tab drifting into a wall.
+    on(window, 'blur', () => this.reset());
+    on(document, 'visibilitychange', () => {
+      if (document.hidden) this.reset();
+    });
+
+    const s = this.surface;
+    on(s, 'pointerdown', (ev) => this._pointerDown(ev), { passive: false });
+    on(s, 'pointermove', (ev) => this._pointerMove(ev), { passive: false });
+    on(s, 'pointerup', (ev) => this._pointerUp(ev));
+    on(s, 'pointercancel', (ev) => this._pointerUp(ev));
+    on(s, 'pointerleave', (ev) => {
+      if (ev.pointerType !== 'touch') this.pointer = null;
+    });
+    // Long-press on mobile otherwise raises a selection menu mid-fight.
+    on(s, 'contextmenu', (ev) => ev.preventDefault());
+
+    on(window, 'gamepadconnected', () => { this.hasGamepad = true; });
+    on(window, 'gamepaddisconnected', () => { this.hasGamepad = false; });
+    return this;
+  }
+
+  detach() {
+    for (const [target, type, fn, opts] of this._handlers) target.removeEventListener(type, fn, opts);
+    this._handlers.length = 0;
+    this._bound = false;
+    this.reset();
+  }
+
+  /** Clears all held state. Safe to call at any time. */
+  reset() {
+    this._keys.clear();
+    this._touchId = -1;
+    this.state.moveX = 0;
+    this.state.moveY = 0;
+    this.state.aimActive = false;
+  }
+
+  _keyDown(ev) {
+    const code = ev.code;
+    // Arrows and space scroll the page by default, which is fatal for a game.
+    // The exception matters: swallowing Space while a button has focus would
+    // break the standard way keyboard users activate a control, so the menus
+    // would become unusable exactly for the people who need them most.
+    const onControl = isActivatable(document.activeElement);
+    if (SCROLL_KEYS.has(code) && !(onControl && (code === 'Space' || code === 'Enter'))) ev.preventDefault();
+    if (ev.repeat) return;
+    this._keys.add(code);
+
+    if (code === 'Escape' || code === 'KeyP') this.actions.pause = true;
+    if (code === 'Enter' || code === 'Space') this.actions.confirm = true;
+    if (code === 'KeyR') this.actions.restart = true;
+    if (code === 'F3' || code === 'Backquote') { this.actions.debug = true; ev.preventDefault(); }
+    if (code === 'KeyM') this.actions.mute = true;
+    if (code === 'Digit1') this.choice = 0;
+    if (code === 'Digit2') this.choice = 1;
+    if (code === 'Digit3') this.choice = 2;
+    if (code === 'ArrowLeft' || code === 'KeyA') this.navX = -1;
+    if (code === 'ArrowRight' || code === 'KeyD') this.navX = 1;
+    if (code === 'ArrowUp' || code === 'KeyW') this.navY = -1;
+    if (code === 'ArrowDown' || code === 'KeyS') this.navY = 1;
+  }
+
+  _keyUp(ev) {
+    this._keys.delete(ev.code);
+  }
+
+  _localPoint(ev) {
+    const r = this.surface.getBoundingClientRect();
+    return { x: ev.clientX - r.left, y: ev.clientY - r.top };
+  }
+
+  _pointerDown(ev) {
+    if (ev.pointerType === 'touch') {
+      this.hasTouch = true;
+      if (this._touchId === -1) {
+        ev.preventDefault();
+        const p = this._localPoint(ev);
+        this._touchId = ev.pointerId;
+        this._touchOriginX = p.x;
+        this._touchOriginY = p.y;
+        this._touchX = p.x;
+        this._touchY = p.y;
+        if (this.surface.setPointerCapture) {
+          try { this.surface.setPointerCapture(ev.pointerId); } catch { /* capture is best-effort */ }
+        }
+      }
+      return;
+    }
+    this.pointer = this._localPoint(ev);
+  }
+
+  _pointerMove(ev) {
+    if (ev.pointerType === 'touch') {
+      if (ev.pointerId !== this._touchId) return;
+      ev.preventDefault();
+      const p = this._localPoint(ev);
+      this._touchX = p.x;
+      this._touchY = p.y;
+      // Re-anchor when the finger travels past full deflection, so a long drag
+      // does not need to be dragged all the way back to change direction.
+      const dx = this._touchX - this._touchOriginX;
+      const dy = this._touchY - this._touchOriginY;
+      const d = len(dx, dy);
+      const R = INPUT.touchStickRadius;
+      if (d > R) {
+        this._touchOriginX = this._touchX - (dx / d) * R;
+        this._touchOriginY = this._touchY - (dy / d) * R;
+      }
+      return;
+    }
+    this.pointer = this._localPoint(ev);
+  }
+
+  _pointerUp(ev) {
+    if (ev.pointerType === 'touch' && ev.pointerId === this._touchId) {
+      this._touchId = -1;
+      return;
+    }
+  }
+
+  /** Virtual stick geometry for the on-screen indicator, or null when idle. */
+  get touchStick() {
+    if (this._touchId === -1) return null;
+    return {
+      originX: this._touchOriginX,
+      originY: this._touchOriginY,
+      x: this._touchX,
+      y: this._touchY,
+      radius: INPUT.touchStickRadius,
+    };
+  }
+
+  /**
+   * Resolves every source into `state`. Called once per rendered frame; the
+   * resulting snapshot is reused for all fixed sub-steps in that frame, which is
+   * correct because input cannot change between them.
+   *
+   * @param {import('../render/renderer.js').Camera} camera
+   * @param {number} playerX world position, for pointer aiming
+   * @param {number} playerY
+   */
+  sample(camera, playerX, playerY) {
+    const st = this.state;
+    let mx = 0;
+    let my = 0;
+
+    const k = this._keys;
+    if (k.has('KeyA') || k.has('ArrowLeft')) mx -= 1;
+    if (k.has('KeyD') || k.has('ArrowRight')) mx += 1;
+    if (k.has('KeyW') || k.has('ArrowUp')) my -= 1;
+    if (k.has('KeyS') || k.has('ArrowDown')) my += 1;
+
+    if (this._touchId !== -1) {
+      const dx = this._touchX - this._touchOriginX;
+      const dy = this._touchY - this._touchOriginY;
+      const R = INPUT.touchStickRadius;
+      const d = len(dx, dy);
+      if (d > R * INPUT.analogFloor) {
+        const m = Math.min(1, d / R);
+        mx += (dx / (d || 1)) * m;
+        my += (dy / (d || 1)) * m;
+      }
+    }
+
+    let aimX = 0;
+    let aimY = 0;
+    let aiming = false;
+
+    const pads = typeof navigator !== 'undefined' && navigator.getGamepads ? navigator.getGamepads() : null;
+    if (pads) {
+      for (let i = 0; i < pads.length; i++) {
+        const pad = pads[i];
+        if (!pad || !pad.connected) continue;
+        this.hasGamepad = true;
+        const lx = applyDeadzone(pad.axes[0] ?? 0);
+        const ly = applyDeadzone(pad.axes[1] ?? 0);
+        mx += lx;
+        my += ly;
+        const rx = applyDeadzone(pad.axes[2] ?? 0);
+        const ry = applyDeadzone(pad.axes[3] ?? 0);
+        if (rx || ry) {
+          aimX = rx;
+          aimY = ry;
+          aiming = true;
+        }
+        this._padEdges(pad);
+        break;
+      }
+    }
+
+    // Mouse aim is deliberately last so it wins over a resting gamepad stick.
+    if (this.pointer) {
+      const worldX = camera.x + (this.pointer.x - camera.cssWidth / 2) / camera.zoom;
+      const worldY = camera.y + (this.pointer.y - camera.cssHeight / 2) / camera.zoom;
+      const dx = worldX - playerX;
+      const dy = worldY - playerY;
+      const d = len(dx, dy);
+      // A pointer resting on the player yields no meaningful direction, so hold
+      // the previous aim rather than snapping to an arbitrary angle.
+      if (d > 12) {
+        aimX = dx / d;
+        aimY = dy / d;
+        aiming = true;
+      }
+    }
+
+    const m = len(mx, my);
+    if (m > 1) {
+      mx /= m;
+      my /= m;
+    }
+    st.moveX = mx;
+    st.moveY = my;
+    if (aiming) {
+      const ad = len(aimX, aimY) || 1;
+      st.aimX = aimX / ad;
+      st.aimY = aimY / ad;
+    }
+    st.aimActive = aiming;
+    return st;
+  }
+
+  _padEdges(pad) {
+    const b = pad.buttons;
+    for (let i = 0; i < b.length; i++) {
+      const pressed = !!(b[i] && b[i].pressed);
+      const was = this._padButtons[i] === true;
+      this._padButtons[i] = pressed;
+      if (pressed && !was) {
+        if (i === 0) this.actions.confirm = true;
+        if (i === 1) this.actions.cancel = true;
+        if (i === 9) this.actions.pause = true;
+        if (i === 12) this.navY = -1;
+        if (i === 13) this.navY = 1;
+        if (i === 14) this.navX = -1;
+        if (i === 15) this.navX = 1;
+      }
+    }
+  }
+
+  /** Clears edge-triggered state. Must be called at the end of every frame. */
+  endFrame() {
+    this.actions.pause = false;
+    this.actions.confirm = false;
+    this.actions.cancel = false;
+    this.actions.restart = false;
+    this.actions.debug = false;
+    this.actions.mute = false;
+    this.choice = -1;
+    this.navX = 0;
+    this.navY = 0;
+  }
+}
+
+const SCROLL_KEYS = new Set(['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Space']);
+
+/** True for elements the browser activates with Space or Enter. */
+function isActivatable(el) {
+  if (!el || !el.tagName) return false;
+  const tag = el.tagName.toLowerCase();
+  return tag === 'button' || tag === 'a' || tag === 'input' || tag === 'select' || tag === 'textarea';
+}
+
+function applyDeadzone(v) {
+  const dz = INPUT.gamepadDeadzone;
+  if (Math.abs(v) < dz) return 0;
+  // Rescale past the deadzone so the usable range is still the full 0..1 and the
+  // stick does not jump to 22% the instant it leaves centre.
+  const sign = v < 0 ? -1 : 1;
+  return sign * clamp((Math.abs(v) - dz) / (1 - dz), 0, 1);
+}
+
+// ---- src/render/atlas.js -----------------------------------------------
+
+/**
+ * Procedurally generated sprite atlas.
+ *
+ * Every pixel of art in the game is drawn here at load time. That is a design
+ * decision, not a shortcut: it means the build has no image assets to fetch (one
+ * fewer round trip, nothing to 404), no licensing questions about provenance,
+ * and art that re-renders crisply at any device pixel ratio instead of shipping
+ * three sizes of PNG.
+ *
+ * Shapes are jittered from a fixed seed, so the silhouettes are irregular enough
+ * to read as organic while being byte-identical on every load and every device.
+ *
+ * Everything lands on one canvas so the Canvas2D backend never swaps texture
+ * sources mid-frame, and a future WebGL backend can upload it as a single
+ * texture unchanged.
+ */
+
+/** Logical (unscaled) footprint of each sprite, in world units. */
+const SPEC = {
+  [SPRITE.PLAYER]: { w: 44, h: 44 },
+  [SPRITE.HUSK]: { w: 36, h: 36 },
+  [SPRITE.DARTER]: { w: 30, h: 30 },
+  [SPRITE.BULWARK]: { w: 56, h: 56 },
+  [SPRITE.SPITTER]: { w: 36, h: 36 },
+  [SPRITE.BOLT]: { w: 26, h: 12 },
+  [SPRITE.ENEMY_BOLT]: { w: 16, h: 16 },
+  [SPRITE.ORB]: { w: 18, h: 18 },
+  [SPRITE.SPARK]: { w: 12, h: 12 },
+  [SPRITE.GLOW]: { w: 96, h: 96 },
+};
+
+class SpriteAtlas {
+  /**
+   * @param {object} [opts]
+   * @param {() => HTMLCanvasElement} [opts.createCanvas] injected so the atlas
+   *   can be built against a stub in headless tests
+   * @param {number} [opts.scale]
+   */
+  constructor(opts = {}) {
+    this.createCanvas =
+      opts.createCanvas ?? (() => /** @type {any} */ (document.createElement('canvas')));
+    this.scale = opts.scale ?? RENDER.atlasScale;
+    /** @type {{sx:number,sy:number,sw:number,sh:number,w:number,h:number}[]} */
+    this.frames = new Array(SPRITE.COUNT);
+    this.canvas = null;
+    this.ready = false;
+  }
+
+  /** @param {number} id @returns {{sx:number,sy:number,sw:number,sh:number,w:number,h:number}} */
+  get(id) {
+    return this.frames[id];
+  }
+
+  build() {
+    const S = this.scale;
+    const pad = 4;
+    // Single row per sprite keeps the packing trivially correct; the atlas is
+    // ten sprites, so a real bin packer would be ceremony without benefit.
+    let x = pad;
+    let maxH = 0;
+    for (let id = 0; id < SPRITE.COUNT; id++) {
+      const spec = SPEC[id];
+      const sw = Math.ceil(spec.w * S);
+      const sh = Math.ceil(spec.h * S);
+      this.frames[id] = { sx: x, sy: pad, sw, sh, w: spec.w, h: spec.h };
+      x += sw + pad;
+      if (sh > maxH) maxH = sh;
+    }
+
+    const canvas = this.createCanvas();
+    canvas.width = x;
+    canvas.height = maxH + pad * 2;
+    const ctx = canvas.getContext('2d');
+    this.canvas = canvas;
+    if (!ctx) return this;
+
+    const rng = new Rng(0x51ce7a);
+    for (let id = 0; id < SPRITE.COUNT; id++) {
+      const f = this.frames[id];
+      ctx.save();
+      ctx.translate(f.sx + f.sw / 2, f.sy + f.sh / 2);
+      this._drawSprite(ctx, id, f.sw, f.sh, rng);
+      ctx.restore();
+    }
+    this.ready = true;
+    return this;
+  }
+
+  _drawSprite(ctx, id, w, h, rng) {
+    const r = Math.min(w, h) / 2;
+    switch (id) {
+      case SPRITE.PLAYER:
+        this._ember(ctx, r);
+        break;
+      case SPRITE.HUSK:
+        this._blob(ctx, r * 0.86, 9, 0.2, PALETTE.coal, '#4A3670', rng);
+        break;
+      case SPRITE.DARTER:
+        this._dart(ctx, r);
+        break;
+      case SPRITE.BULWARK:
+        this._bulwark(ctx, r);
+        break;
+      case SPRITE.SPITTER:
+        this._spitter(ctx, r, rng);
+        break;
+      case SPRITE.BOLT:
+        this._bolt(ctx, w, h);
+        break;
+      case SPRITE.ENEMY_BOLT:
+        this._enemyBolt(ctx, r);
+        break;
+      case SPRITE.ORB:
+        this._orb(ctx, r);
+        break;
+      case SPRITE.SPARK:
+      case SPRITE.GLOW:
+        this._softDot(ctx, r);
+        break;
+      default:
+        break;
+    }
+  }
+
+  /** The player: a hot core inside a cooler corona. */
+  _ember(ctx, r) {
+    const g = ctx.createRadialGradient(0, 0, 0, 0, 0, r);
+    g.addColorStop(0, '#FFF6E2');
+    g.addColorStop(0.28, PALETTE.ember);
+    g.addColorStop(0.62, 'rgba(255,120,26,0.55)');
+    g.addColorStop(1, 'rgba(255,120,26,0)');
+    ctx.fillStyle = g;
+    ctx.beginPath();
+    ctx.arc(0, 0, r, 0, TAU);
+    ctx.fill();
+    ctx.fillStyle = '#FFFBF0';
+    ctx.beginPath();
+    ctx.arc(0, 0, r * 0.2, 0, TAU);
+    ctx.fill();
+  }
+
+  /** Irregular polygon with a rim light. Reads as cooled, cracked ash. */
+  _blob(ctx, r, points, jitter, fill, rim, rng) {
+    ctx.beginPath();
+    for (let i = 0; i <= points; i++) {
+      const a = (i / points) * TAU;
+      const rad = r * (1 - jitter / 2 + rng.next() * jitter);
+      const px = Math.cos(a) * rad;
+      const py = Math.sin(a) * rad;
+      if (i === 0) ctx.moveTo(px, py);
+      else ctx.lineTo(px, py);
+    }
+    ctx.closePath();
+    ctx.fillStyle = fill;
+    ctx.fill();
+    ctx.lineWidth = Math.max(1, r * 0.13);
+    ctx.strokeStyle = rim;
+    ctx.stroke();
+    // Off-centre highlight gives the silhouette a light direction without a
+    // second draw pass at runtime.
+    ctx.fillStyle = 'rgba(232,227,217,0.16)';
+    ctx.beginPath();
+    ctx.arc(-r * 0.26, -r * 0.3, r * 0.3, 0, TAU);
+    ctx.fill();
+  }
+
+  /** Darter: a forward-swept wedge. Silhouette alone signals "fast". */
+  _dart(ctx, r) {
+    ctx.beginPath();
+    ctx.moveTo(r, 0);
+    ctx.lineTo(-r * 0.55, r * 0.78);
+    ctx.lineTo(-r * 0.2, 0);
+    ctx.lineTo(-r * 0.55, -r * 0.78);
+    ctx.closePath();
+    ctx.fillStyle = '#9C7BC9';
+    ctx.fill();
+    ctx.lineWidth = Math.max(1, r * 0.14);
+    ctx.strokeStyle = '#553B85';
+    ctx.stroke();
+  }
+
+  /** Bulwark: heavy plated hexagon. Wide and obviously slow. */
+  _bulwark(ctx, r) {
+    ctx.beginPath();
+    for (let i = 0; i < 6; i++) {
+      const a = (i / 6) * TAU + Math.PI / 6;
+      const px = Math.cos(a) * r;
+      const py = Math.sin(a) * r;
+      if (i === 0) ctx.moveTo(px, py);
+      else ctx.lineTo(px, py);
+    }
+    ctx.closePath();
+    ctx.fillStyle = '#5F4787';
+    ctx.fill();
+    ctx.lineWidth = Math.max(1.5, r * 0.12);
+    ctx.strokeStyle = '#33254D';
+    ctx.stroke();
+    ctx.beginPath();
+    for (let i = 0; i < 6; i++) {
+      const a = (i / 6) * TAU + Math.PI / 6;
+      const px = Math.cos(a) * r * 0.52;
+      const py = Math.sin(a) * r * 0.52;
+      if (i === 0) ctx.moveTo(px, py);
+      else ctx.lineTo(px, py);
+    }
+    ctx.closePath();
+    ctx.fillStyle = '#7B5EA7';
+    ctx.fill();
+  }
+
+  /** Spitter: blob with a single bright aperture, so the threat direction reads. */
+  _spitter(ctx, r, rng) {
+    this._blob(ctx, r * 0.84, 7, 0.26, '#6B4E96', '#3B2A5C', rng);
+    const g = ctx.createRadialGradient(r * 0.34, 0, 0, r * 0.34, 0, r * 0.42);
+    g.addColorStop(0, '#FFE9B8');
+    g.addColorStop(1, 'rgba(255,159,28,0)');
+    ctx.fillStyle = g;
+    ctx.beginPath();
+    ctx.arc(r * 0.34, 0, r * 0.42, 0, TAU);
+    ctx.fill();
+  }
+
+  /** Player projectile: a capsule with a white-hot leading edge. */
+  _bolt(ctx, w, h) {
+    const g = ctx.createLinearGradient(-w / 2, 0, w / 2, 0);
+    g.addColorStop(0, 'rgba(255,120,26,0)');
+    g.addColorStop(0.45, PALETTE.ember);
+    g.addColorStop(1, '#FFFBF0');
+    ctx.fillStyle = g;
+    const r = h / 2;
+    ctx.beginPath();
+    ctx.moveTo(-w / 2, -r * 0.55);
+    ctx.lineTo(w / 2 - r, -r);
+    ctx.arc(w / 2 - r, 0, r, -Math.PI / 2, Math.PI / 2);
+    ctx.lineTo(-w / 2, r * 0.55);
+    ctx.closePath();
+    ctx.fill();
+  }
+
+  _enemyBolt(ctx, r) {
+    const g = ctx.createRadialGradient(0, 0, 0, 0, 0, r);
+    g.addColorStop(0, '#E5D6FF');
+    g.addColorStop(0.5, PALETTE.coal);
+    g.addColorStop(1, 'rgba(123,94,167,0)');
+    ctx.fillStyle = g;
+    ctx.beginPath();
+    ctx.arc(0, 0, r, 0, TAU);
+    ctx.fill();
+  }
+
+  /** Experience orb: a cold teal rhombus, deliberately unlike anything hostile. */
+  _orb(ctx, r) {
+    const g = ctx.createRadialGradient(0, 0, 0, 0, 0, r);
+    g.addColorStop(0, 'rgba(61,214,192,0.55)');
+    g.addColorStop(1, 'rgba(61,214,192,0)');
+    ctx.fillStyle = g;
+    ctx.beginPath();
+    ctx.arc(0, 0, r, 0, TAU);
+    ctx.fill();
+    ctx.fillStyle = PALETTE.quench;
+    ctx.beginPath();
+    ctx.moveTo(0, -r * 0.62);
+    ctx.lineTo(r * 0.44, 0);
+    ctx.lineTo(0, r * 0.62);
+    ctx.lineTo(-r * 0.44, 0);
+    ctx.closePath();
+    ctx.fill();
+    ctx.fillStyle = '#EAFFFA';
+    ctx.beginPath();
+    ctx.moveTo(0, -r * 0.3);
+    ctx.lineTo(r * 0.18, 0);
+    ctx.lineTo(0, r * 0.3);
+    ctx.lineTo(-r * 0.18, 0);
+    ctx.closePath();
+    ctx.fill();
+  }
+
+  /** White soft dot, tinted at draw time. Serves sparks and area glows alike. */
+  _softDot(ctx, r) {
+    const g = ctx.createRadialGradient(0, 0, 0, 0, 0, r);
+    g.addColorStop(0, 'rgba(255,255,255,1)');
+    g.addColorStop(0.4, 'rgba(255,255,255,0.5)');
+    g.addColorStop(1, 'rgba(255,255,255,0)');
+    ctx.fillStyle = g;
+    ctx.beginPath();
+    ctx.arc(0, 0, r, 0, TAU);
+    ctx.fill();
+  }
+}
+
+// ---- src/render/canvas2d.js --------------------------------------------
+
+/** TINT enum to CSS colour. Index order must match game/fx.js. */
+const TINT_COLOR = [PALETTE.ember, PALETTE.coal, PALETTE.quench, PALETTE.bone, PALETTE.blood];
+
+/**
+ * Integer-to-string cache. `String(n)` allocates, and damage numbers are the one
+ * place per frame where we would otherwise create dozens of short-lived strings.
+ */
+const NUM_CACHE = new Array(1001);
+for (let i = 0; i <= 1000; i++) NUM_CACHE[i] = String(i);
+function fmt(n) {
+  const i = n | 0;
+  if (i >= 0 && i <= 1000) return NUM_CACHE[i];
+  return String(i);
+}
+
+/**
+ * Canvas2D rendering backend.
+ *
+ * Canvas2D rather than WebGL for the first backend is a deliberate trade. At the
+ * measured entity budget the bottleneck is state changes and compositing, not
+ * fill rate, and Canvas2D avoids an entire class of portability problems: no
+ * shader compilation stalls, no context-loss recovery on mobile Safari, no
+ * precision differences between drivers. The command-list seam means a WebGL2
+ * backend can be added later for the particle layer specifically, which is the
+ * only place a batched renderer would actually win.
+ *
+ * Two techniques carry most of the performance here:
+ *  - sprites are drawn with an explicit composed matrix via `setTransform`
+ *    instead of `save`/`rotate`/`restore`, removing two state operations per
+ *    sprite across ~500 sprites per frame;
+ *  - particles are axis-aligned `fillRect` calls grouped by colour, because
+ *    `drawImage` of a soft dot is several times the cost and, at particle size,
+ *    visually indistinguishable once additive blending is on.
+ */
+class Canvas2DBackend {
+  /**
+   * @param {HTMLCanvasElement} canvas
+   * @param {import('./atlas.js').SpriteAtlas} atlas
+   */
+  constructor(canvas, atlas) {
+    this.canvas = canvas;
+    this.atlas = atlas;
+    this.ctx = /** @type {CanvasRenderingContext2D} */ (
+      canvas.getContext('2d', { alpha: false, desynchronized: true })
+    );
+    this._vignette = null;
+    this._vignetteKey = '';
+    this._pixelWidth = 0;
+    this._pixelHeight = 0;
+    this.lost = false;
+
+    // Canvas2D contexts can be lost on mobile when the GPU process restarts.
+    // Without this the game keeps running and draws nothing, which looks like a
+    // freeze; rebuilding the atlas restores it silently.
+    if (canvas.addEventListener) {
+      canvas.addEventListener('contextlost', (ev) => {
+        ev.preventDefault();
+        this.lost = true;
+      });
+      canvas.addEventListener('contextrestored', () => {
+        this.lost = false;
+        this.atlas.build();
+        this._vignetteKey = '';
+      });
+    }
+  }
+
+  /**
+   * Sizes the backing store to physical pixels while keeping CSS size in logical
+   * pixels. Assigning width/height clears the canvas, so this is guarded to only
+   * run when the size actually changed.
+   */
+  resize(camera) {
+    const pw = Math.max(1, Math.round(camera.cssWidth * camera.dpr));
+    const ph = Math.max(1, Math.round(camera.cssHeight * camera.dpr));
+    if (pw === this._pixelWidth && ph === this._pixelHeight) return;
+    this._pixelWidth = pw;
+    this._pixelHeight = ph;
+    this.canvas.width = pw;
+    this.canvas.height = ph;
+    this.canvas.style.width = camera.cssWidth + 'px';
+    this.canvas.style.height = camera.cssHeight + 'px';
+    this._vignetteKey = '';
+  }
+
+  /**
+   * @param {import('./renderer.js').DrawList} list
+   * @param {import('./renderer.js').Camera} camera
+   * @param {{hpFraction: number, additive: boolean, showText: boolean, danger: number}} frame
+   */
+  render(list, camera, frame) {
+    const ctx = this.ctx;
+    if (!ctx || this.lost) return;
+
+    const dpr = camera.dpr;
+    const s = camera.zoom * dpr;
+    // World-to-screen: sx = s*wx + tx. Precomputed once and reused for every
+    // command, including manual projection of screen-space text.
+    const tx = (camera.cssWidth / 2 - (camera.x + camera.shakeX) * camera.zoom) * dpr;
+    const ty = (camera.cssHeight / 2 - (camera.y + camera.shakeY) * camera.zoom) * dpr;
+
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.globalCompositeOperation = 'source-over';
+    ctx.globalAlpha = 1;
+    ctx.fillStyle = PALETTE.ink;
+    ctx.fillRect(0, 0, this._pixelWidth, this._pixelHeight);
+
+    ctx.setTransform(s, 0, 0, s, tx, ty);
+    this._drawFloor(ctx, camera);
+
+    this._drawSpriteLayer(ctx, list, LAYER.ORBS, s, tx, ty, false);
+    this._drawSpriteLayer(ctx, list, LAYER.ENEMIES, s, tx, ty, false);
+    this._drawSpriteLayer(ctx, list, LAYER.PLAYER, s, tx, ty, false);
+    this._drawSpriteLayer(ctx, list, LAYER.PROJECTILES, s, tx, ty, frame.additive);
+    this._drawParticles(ctx, list, s, tx, ty, frame.additive);
+
+    ctx.setTransform(s, 0, 0, s, tx, ty);
+    this._drawOverlay(ctx, list);
+
+    if (frame.showText) this._drawText(ctx, list, s, tx, ty, dpr);
+
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.globalCompositeOperation = 'source-over';
+    ctx.globalAlpha = 1;
+    this._drawVignette(ctx, frame.danger);
+  }
+
+  /**
+   * Arena floor. Only the grid lines inside the view are emitted, so cost is
+   * bounded by viewport size rather than arena size, and the whole floor is a
+   * single path with one stroke.
+   */
+  _drawFloor(ctx, camera) {
+    const step = RENDER.gridSpacing;
+    const x0 = Math.floor(camera.minX / step) * step;
+    const x1 = Math.ceil(camera.maxX / step) * step;
+    const y0 = Math.floor(camera.minY / step) * step;
+    const y1 = Math.ceil(camera.maxY / step) * step;
+
+    ctx.beginPath();
+    for (let x = x0; x <= x1; x += step) {
+      ctx.moveTo(x, y0);
+      ctx.lineTo(x, y1);
+    }
+    for (let y = y0; y <= y1; y += step) {
+      ctx.moveTo(x0, y);
+      ctx.lineTo(x1, y);
+    }
+    ctx.lineWidth = 1 / camera.zoom;
+    ctx.strokeStyle = PALETTE.ash;
+    ctx.globalAlpha = 0.55;
+    ctx.stroke();
+    ctx.globalAlpha = 1;
+
+    // Arena wall. Drawn only when it is actually near the view, so the common
+    // case costs nothing.
+    const h = ARENA.half;
+    if (camera.minX < -h || camera.maxX > h || camera.minY < -h || camera.maxY > h) {
+      ctx.lineWidth = 3 / camera.zoom;
+      ctx.strokeStyle = PALETTE.coal;
+      ctx.globalAlpha = 0.75;
+      ctx.strokeRect(-h, -h, h * 2, h * 2);
+      ctx.globalAlpha = 1;
+    }
+  }
+
+  _drawSpriteLayer(ctx, list, layer, s, tx, ty, additive) {
+    const n = list.layerCount[layer];
+    if (n === 0) return;
+    const ids = list.layers[layer];
+    const atlas = this.atlas;
+    ctx.globalCompositeOperation = additive ? 'lighter' : 'source-over';
+
+    for (let i = 0; i < n; i++) {
+      const c = ids[i];
+      if (list.type[c] !== CMD.SPRITE) continue;
+      const f = atlas.get(list.sprite[c]);
+      if (!f) continue;
+      const rot = list.f2[c];
+      const sc = list.f3[c];
+      ctx.globalAlpha = list.f4[c];
+      const wx = list.f0[c];
+      const wy = list.f1[c];
+      const k = s * sc;
+      if (rot === 0) {
+        // Fast path: no trigonometry and no matrix composition for the majority
+        // of sprites, which never rotate.
+        ctx.setTransform(k, 0, 0, k, s * wx + tx, s * wy + ty);
+      } else {
+        const cos = Math.cos(rot);
+        const sin = Math.sin(rot);
+        ctx.setTransform(k * cos, k * sin, -k * sin, k * cos, s * wx + tx, s * wy + ty);
+      }
+      ctx.drawImage(atlas.canvas, f.sx, f.sy, f.sw, f.sh, -f.w / 2, -f.h / 2, f.w, f.h);
+    }
+    ctx.globalAlpha = 1;
+    ctx.globalCompositeOperation = 'source-over';
+  }
+
+  /**
+   * Particles, grouped by colour so `fillStyle` is assigned at most once per
+   * tint instead of once per particle.
+   */
+  _drawParticles(ctx, list, s, tx, ty, additive) {
+    const n = list.layerCount[LAYER.PARTICLES];
+    if (n === 0) return;
+    const ids = list.layers[LAYER.PARTICLES];
+    ctx.setTransform(s, 0, 0, s, tx, ty);
+    ctx.globalCompositeOperation = additive ? 'lighter' : 'source-over';
+
+    for (let t = 0; t < TINT_COLOR.length; t++) {
+      let opened = false;
+      for (let i = 0; i < n; i++) {
+        const c = ids[i];
+        if (list.tint[c] !== t) continue;
+        if (!opened) {
+          ctx.fillStyle = TINT_COLOR[t];
+          opened = true;
+        }
+        const half = list.f2[c];
+        ctx.globalAlpha = list.f3[c];
+        ctx.fillRect(list.f0[c] - half, list.f1[c] - half, half * 2, half * 2);
+      }
+    }
+    ctx.globalAlpha = 1;
+    ctx.globalCompositeOperation = 'source-over';
+  }
+
+  /** Arcs: the diegetic health corona and enemy health rings. */
+  _drawOverlay(ctx, list) {
+    const n = list.layerCount[LAYER.OVERLAY];
+    if (n === 0) return;
+    const ids = list.layers[LAYER.OVERLAY];
+    ctx.lineCap = 'round';
+    for (let i = 0; i < n; i++) {
+      const c = ids[i];
+      if (list.type[c] !== CMD.ARC) continue;
+      ctx.globalAlpha = list.sprite[c] / 255;
+      ctx.strokeStyle = TINT_COLOR[list.tint[c]];
+      ctx.lineWidth = list.f5[c];
+      ctx.beginPath();
+      ctx.arc(list.f0[c], list.f1[c], list.f2[c], list.f3[c], list.f4[c]);
+      ctx.stroke();
+    }
+    ctx.globalAlpha = 1;
+    ctx.lineCap = 'butt';
+  }
+
+  /**
+   * Combat text is projected to screen space by hand rather than drawn under the
+   * camera transform: scaled glyphs are blurry, and a constant on-screen size
+   * keeps numbers readable at every zoom level.
+   */
+  _drawText(ctx, list, s, tx, ty, dpr) {
+    const n = list.layerCount[LAYER.TEXT];
+    if (n === 0) return;
+    const ids = list.layers[LAYER.TEXT];
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.globalCompositeOperation = 'source-over';
+
+    let lastFont = '';
+    for (let i = 0; i < n; i++) {
+      const c = ids[i];
+      if (list.type[c] !== CMD.TEXT) continue;
+      const crit = list.sprite[c] === 1;
+      const size = Math.round((crit ? 17 : 13) * list.f4[c] * dpr);
+      const font = `${crit ? 700 : 600} ${size}px ui-monospace, "SFMono-Regular", "Cascadia Mono", Menlo, Consolas, monospace`;
+      if (font !== lastFont) {
+        ctx.font = font;
+        lastFont = font;
+      }
+      ctx.globalAlpha = list.f3[c];
+      ctx.fillStyle = TINT_COLOR[list.tint[c]];
+      ctx.fillText(fmt(list.f2[c]), s * list.f0[c] + tx, s * list.f1[c] + ty);
+    }
+    ctx.globalAlpha = 1;
+  }
+
+  /**
+   * Screen-edge vignette that reddens as heat runs low. The gradient is cached
+   * and rebuilt only on resize: constructing one per frame is a measurable
+   * allocation and a surprisingly expensive call.
+   */
+  _drawVignette(ctx, danger) {
+    const w = this._pixelWidth;
+    const h = this._pixelHeight;
+    const key = w + 'x' + h;
+    if (key !== this._vignetteKey) {
+      const g = ctx.createRadialGradient(w / 2, h / 2, Math.min(w, h) * 0.32, w / 2, h / 2, Math.max(w, h) * 0.72);
+      g.addColorStop(0, 'rgba(0,0,0,0)');
+      g.addColorStop(1, 'rgba(0,0,0,0.62)');
+      this._vignette = g;
+      this._vignetteKey = key;
+    }
+    ctx.fillStyle = this._vignette;
+    ctx.fillRect(0, 0, w, h);
+
+    const d = clamp(danger, 0, 1);
+    if (d > 0.01) {
+      ctx.globalAlpha = d * 0.3;
+      ctx.fillStyle = PALETTE.blood;
+      ctx.fillRect(0, 0, w, h);
+      ctx.globalAlpha = 1;
+    }
+  }
+}
+
+// ---- src/ui/storage.js -------------------------------------------------
+
+/**
+ * Storage that cannot throw.
+ *
+ * `localStorage` raises in Safari private browsing, in sandboxed iframes, and
+ * whenever a quota is exceeded. A high score is not worth crashing a run over, so
+ * every access is guarded and silently falls back to an in-memory map that lasts
+ * for the session.
+ */
+const memory = new Map();
+let backing = null;
+
+function store() {
+  if (backing !== null) return backing;
+  try {
+    const probe = '__ember_probe__';
+    globalThis.localStorage.setItem(probe, '1');
+    globalThis.localStorage.removeItem(probe);
+    backing = globalThis.localStorage;
+  } catch {
+    backing = false;
+  }
+  return backing;
+}
+
+/** @param {string} key @param {string} fallback */
+function readValue(key, fallback = '') {
+  const s = store();
+  if (!s) return memory.has(key) ? memory.get(key) : fallback;
+  try {
+    const v = s.getItem(key);
+    return v === null ? fallback : v;
+  } catch {
+    return fallback;
+  }
+}
+
+function writeValue(key, value) {
+  const s = store();
+  memory.set(key, value);
+  if (!s) return;
+  try {
+    s.setItem(key, value);
+  } catch {
+    /* quota or privacy mode; the in-memory copy already holds it */
+  }
+}
+
+/** @param {string} key @param {number} fallback */
+function readNumber(key, fallback = 0) {
+  const n = Number(readValue(key, String(fallback)));
+  return Number.isFinite(n) ? n : fallback;
+}
+
+// ---- src/ui/ui.js ------------------------------------------------------
+
+/**
+ * DOM presentation layer: heads-up display, modal screens and the touch stick
+ * indicator.
+ *
+ * The HUD is DOM rather than canvas-drawn on purpose. Text rendered by the
+ * browser is sharper at every device pixel ratio, it reflows correctly for large
+ * accessibility font settings, and screen readers can reach it. The cost is
+ * layout work, which is why every field is dirty-checked and the whole HUD is
+ * refreshed at a capped rate instead of once per frame.
+ *
+ * Modal screens are real focusable dialogs with a focus trap, so the game is
+ * completable without a mouse.
+ */
+class UI {
+  /**
+   * @param {ParentNode} root
+   * @param {{onStart: Function, onResume: Function, onRestart: Function,
+   *          onPick: (index: number) => void, onToggleMute: Function}} handlers
+   */
+  constructor(root, handlers) {
+    this.root = root;
+    this.h = handlers;
+    const q = (sel) => /** @type {HTMLElement} */ (root.querySelector(sel));
+
+    this.el = {
+      xpFill: q('#xp-fill'),
+      clock: q('#stat-clock'),
+      level: q('#stat-level'),
+      heat: q('#stat-heat'),
+      heatFill: q('#heat-fill'),
+      kills: q('#stat-kills'),
+      weapons: q('#weapon-chips'),
+      stick: q('#stick'),
+      stickNub: q('#stick-nub'),
+      live: q('#live'),
+      debug: q('#debug'),
+      cards: q('#cards'),
+      muteBtn: q('#btn-mute'),
+      screens: {
+        title: q('#screen-title'),
+        levelup: q('#screen-levelup'),
+        paused: q('#screen-paused'),
+        gameover: q('#screen-gameover'),
+      },
+      finalTime: q('#final-time'),
+      finalLevel: q('#final-level'),
+      finalKills: q('#final-kills'),
+      bestLine: q('#best-line'),
+    };
+
+    /** Cached last-rendered values, so we only touch the DOM when text changes. */
+    this._shown = { clock: '', level: '', heat: '', kills: '', xp: -1, heatFrac: -1, weapons: '' };
+    // Starts as null so the first setScreen call always applies, rather than
+    // silently no-opping and leaving the markup's initial state unsynchronised.
+    this._screen = null;
+    this._accum = 0;
+    this._lastFocus = null;
+    this._trapHandler = (ev) => this._trapTab(ev);
+
+    this._bind();
+  }
+
+  _bind() {
+    const click = (sel, fn) => {
+      const el = this.root.querySelector(sel);
+      if (el) el.addEventListener('click', fn);
+    };
+    click('#btn-start', () => this.h.onStart());
+    click('#btn-resume', () => this.h.onResume());
+    click('#btn-restart-pause', () => this.h.onRestart());
+    click('#btn-restart-over', () => this.h.onRestart());
+    click('#btn-mute', () => this.h.onToggleMute());
+
+    // Delegated so cards can be rebuilt freely without re-binding listeners.
+    this.el.cards.addEventListener('click', (ev) => {
+      const btn = /** @type {HTMLElement} */ (ev.target).closest('[data-choice]');
+      if (!btn) return;
+      const idx = Number(btn.getAttribute('data-choice'));
+      if (Number.isFinite(idx)) this.h.onPick(idx);
+    });
+  }
+
+  get screen() {
+    return this._screen;
+  }
+
+  /** @param {'title'|'none'|'levelup'|'paused'|'gameover'} name */
+  setScreen(name) {
+    if (this._screen === name) return;
+    const previous = this._screen;
+    this._screen = name;
+
+    for (const [key, el] of Object.entries(this.el.screens)) {
+      const active = key === name;
+      el.hidden = !active;
+      el.classList.toggle('is-open', active);
+    }
+    this.root.querySelector('#hud').classList.toggle('is-dim', name !== 'none');
+
+    if (name === 'none') {
+      document.removeEventListener('keydown', this._trapHandler, true);
+      // Return focus to whatever opened the dialog; leaving focus on a hidden
+      // button strands keyboard users at the top of the document.
+      if (this._lastFocus && this._lastFocus.isConnected) this._lastFocus.focus({ preventScroll: true });
+      this._lastFocus = null;
+      return;
+    }
+
+    if (previous === 'none') this._lastFocus = /** @type {HTMLElement} */ (document.activeElement);
+    document.addEventListener('keydown', this._trapHandler, true);
+    const first = this._focusables()[0];
+    if (first) first.focus({ preventScroll: true });
+  }
+
+  _focusables() {
+    const el = this.el.screens[this._screen];
+    if (!el) return [];
+    return /** @type {HTMLElement[]} */ (
+      Array.from(el.querySelectorAll('button:not([disabled]), [href], [tabindex]:not([tabindex="-1"])'))
+    ).filter((n) => n.offsetParent !== null || n === document.activeElement);
+  }
+
+  _trapTab(ev) {
+    if (ev.key !== 'Tab') return;
+    const items = this._focusables();
+    if (items.length === 0) return;
+    const first = items[0];
+    const last = items[items.length - 1];
+    const active = document.activeElement;
+    if (ev.shiftKey && (active === first || !items.includes(/** @type {HTMLElement} */ (active)))) {
+      ev.preventDefault();
+      last.focus();
+    } else if (!ev.shiftKey && active === last) {
+      ev.preventDefault();
+      first.focus();
+    }
+  }
+
+  /**
+   * @param {import('../game/world.js').World} world
+   * @param {number} dt real frame delta
+   * @param {boolean} [force]
+   */
+  syncHud(world, dt, force = false) {
+    this._accum += dt;
+    if (!force && this._accum < 1 / HUD.hudHz) return;
+    this._accum = 0;
+
+    const run = world.run;
+    const s = this._shown;
+
+    const clock = formatClock(run.time);
+    if (clock !== s.clock) {
+      s.clock = clock;
+      this.el.clock.textContent = clock;
+    }
+
+    const level = String(run.level);
+    if (level !== s.level) {
+      s.level = level;
+      this.el.level.textContent = level;
+    }
+
+    const hp = Math.ceil(Math.max(0, world.hp));
+    const maxHp = Math.round(world.maxHp);
+    const heat = hp + '/' + maxHp;
+    if (heat !== s.heat) {
+      s.heat = heat;
+      this.el.heat.textContent = heat;
+    }
+    const heatFrac = Math.max(0, Math.min(1, hp / Math.max(1, maxHp)));
+    if (Math.abs(heatFrac - s.heatFrac) > 0.004) {
+      s.heatFrac = heatFrac;
+      this.el.heatFill.style.transform = `scaleX(${heatFrac})`;
+      this.el.heatFill.classList.toggle('is-critical', heatFrac <= 0.35);
+    }
+
+    const kills = String(run.kills);
+    if (kills !== s.kills) {
+      s.kills = kills;
+      this.el.kills.textContent = kills;
+    }
+
+    const xpFrac = Math.max(0, Math.min(1, run.xp / Math.max(1, run.xpNeeded)));
+    if (Math.abs(xpFrac - s.xp) > 0.002) {
+      s.xp = xpFrac;
+      // scaleX rather than width: a transform is composited and never triggers
+      // layout, which matters when this updates twelve times a second.
+      this.el.xpFill.style.transform = `scaleX(${xpFrac})`;
+    }
+
+    let chips = '';
+    for (const slot of world.weapons) chips += WEAPONS[slot.index].name + '\u2009' + slot.level + '|';
+    if (chips !== s.weapons) {
+      s.weapons = chips;
+      this._renderWeapons(world);
+    }
+  }
+
+  _renderWeapons(world) {
+    const host = this.el.weapons;
+    host.textContent = '';
+    for (const slot of world.weapons) {
+      const def = WEAPONS[slot.index];
+      const chip = document.createElement('li');
+      chip.className = 'chip';
+      const name = document.createElement('span');
+      name.className = 'chip__name';
+      name.textContent = def.name;
+      const lvl = document.createElement('span');
+      lvl.className = 'chip__level';
+      lvl.textContent = String(slot.level);
+      chip.append(name, lvl);
+      host.append(chip);
+    }
+  }
+
+  /**
+   * @param {{index: number, name: string, desc: string, stacks: number, max: number}[]} entries
+   */
+  showUpgrades(entries) {
+    const host = this.el.cards;
+    host.textContent = '';
+    // Rendered from the array length, never from a hard-coded three: the
+    // catalogue can legitimately run out of legal offers late in a run.
+    host.style.setProperty('--card-count', String(entries.length));
+
+    entries.forEach((entry, i) => {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'card';
+      btn.setAttribute('data-choice', String(entry.index));
+
+      const key = document.createElement('kbd');
+      key.className = 'card__key';
+      key.textContent = String(i + 1);
+
+      const name = document.createElement('span');
+      name.className = 'card__name';
+      name.textContent = entry.name;
+
+      const desc = document.createElement('span');
+      desc.className = 'card__desc';
+      desc.textContent = entry.desc;
+
+      const pips = document.createElement('span');
+      pips.className = 'card__pips';
+      pips.setAttribute('aria-label', `${entry.stacks} of ${entry.max} taken`);
+      for (let p = 0; p < entry.max; p++) {
+        const pip = document.createElement('i');
+        if (p < entry.stacks) pip.className = 'is-filled';
+        pips.append(pip);
+      }
+
+      btn.append(key, name, desc, pips);
+      host.append(btn);
+    });
+  }
+
+  /** @param {{time: number, level: number, kills: number}} stats */
+  showGameOver(stats, bestTime) {
+    this.el.finalTime.textContent = formatClock(stats.time);
+    this.el.finalLevel.textContent = String(stats.level);
+    this.el.finalKills.textContent = String(stats.kills);
+    const beat = stats.time >= bestTime;
+    this.el.bestLine.textContent = beat
+      ? 'Longest run yet.'
+      : `Your longest run is ${formatClock(bestTime)}.`;
+  }
+
+  /** @param {{originX:number,originY:number,x:number,y:number,radius:number}|null} stick */
+  setTouchStick(stick) {
+    const el = this.el.stick;
+    if (!stick) {
+      if (!el.hidden) el.hidden = true;
+      return;
+    }
+    if (el.hidden) el.hidden = false;
+    el.style.transform = `translate(${stick.originX}px, ${stick.originY}px)`;
+    const dx = stick.x - stick.originX;
+    const dy = stick.y - stick.originY;
+    this.el.stickNub.style.transform = `translate(${dx}px, ${dy}px)`;
+  }
+
+  setDebug(text) {
+    const el = this.el.debug;
+    if (text === null) {
+      if (!el.hidden) el.hidden = true;
+      return;
+    }
+    if (el.hidden) el.hidden = false;
+    if (el.textContent !== text) el.textContent = text;
+  }
+
+  setMuted(muted) {
+    this.el.muteBtn.setAttribute('aria-pressed', String(muted));
+    this.el.muteBtn.textContent = muted ? 'Sound off' : 'Sound on';
+  }
+
+  /** Polite announcement for screen readers. Used sparingly: level ups and death. */
+  announce(text) {
+    this.el.live.textContent = text;
+  }
+}
+
+/** mm:ss, always two digits. */
+function formatClock(seconds) {
+  const s = Math.max(0, Math.floor(seconds));
+  const m = Math.floor(s / 60);
+  const r = s % 60;
+  return (m < 10 ? '0' : '') + m + ':' + (r < 10 ? '0' : '') + r;
+}
+
+// ---- src/main.js -------------------------------------------------------
+
+/**
+ * Application shell.
+ *
+ * This is the only module that knows about all the others. Everything below it
+ * is independently testable: the simulation has no DOM, the renderer has no
+ * gameplay, the input layer has no opinion about either. The shell's whole job is
+ * the state machine and the wiring.
+ */
+
+const BEST_KEY = 'emberdrift.best';
+const DRAW_CAPACITY = 12000;
+
+/** @type {'title'|'playing'|'levelup'|'paused'|'gameover'} */
+let state = 'title';
+
+const app = /** @type {HTMLElement} */ (document.getElementById('app'));
+const canvas = /** @type {HTMLCanvasElement} */ (document.getElementById('stage'));
+
+const reducedMotionQuery =
+  typeof matchMedia === 'function' ? matchMedia('(prefers-reduced-motion: reduce)') : null;
+let reducedMotion = reducedMotionQuery ? reducedMotionQuery.matches : false;
+if (reducedMotionQuery && reducedMotionQuery.addEventListener) {
+  reducedMotionQuery.addEventListener('change', (ev) => {
+    reducedMotion = ev.matches;
+  });
+}
+
+const bus = new EventBus();
+const atlas = new SpriteAtlas().build();
+const backend = new Canvas2DBackend(canvas, atlas);
+const camera = new Camera();
+const drawList = new DrawList(DRAW_CAPACITY);
+const quality = new QualityController();
+/** Separate RNG for presentation. Keeping shake out of the simulation's stream
+ *  means the run stays reproducible no matter how many frames were rendered. */
+const viewRng = new Rng(0xC0FFEE);
+
+const world = new World({ seed: initialSeed(), bus });
+const input = new InputManager(canvas).attach();
+const audio = new AudioEngine();
+
+let debugVisible = false;
+let bestTime = readNumber(BEST_KEY, 0);
+/** Upgrade indices currently on offer, in card order. */
+let currentChoices = [];
+/** Extra screen-flash added on damage; decays in real time, not sim time. */
+let hurtFlash = 0;
+
+const ui = new UI(document, {
+  onStart: () => startRun(),
+  onResume: () => setState('playing'),
+  onRestart: () => startRun(),
+  onPick: (index) => pickUpgrade(index),
+  onToggleMute: () => {
+    audio.unlock();
+    ui.setMuted(audio.toggleMute());
+  },
+});
+
+/** `?seed=` makes a run reproducible, which is how balance bugs get reported. */
+function initialSeed() {
+  try {
+    const p = new URLSearchParams(location.search).get('seed');
+    if (p !== null && p !== '') {
+      const n = Number(p);
+      if (Number.isFinite(n)) return n >>> 0;
+    }
+  } catch {
+    /* location may be unavailable in an embedded context */
+  }
+  return (Date.now() ^ (Math.random() * 0xffffffff)) >>> 0;
+}
+
+// ---------------------------------------------------------------------------
+// Audio cues
+// ---------------------------------------------------------------------------
+
+bus.on(EV.SHOT_FIRED, () => audio.play('shoot'));
+bus.on(EV.ENEMY_HIT, () => audio.play('hit'));
+bus.on(EV.ENEMY_KILLED, () => audio.play('kill'));
+bus.on(EV.XP_COLLECTED, () => {
+  audio.play('xp', world.run.xp / Math.max(1, world.run.xpNeeded));
+});
+bus.on(EV.PLAYER_HURT, () => {
+  audio.play('hurt');
+  hurtFlash = 1;
+});
+bus.on(EV.LEVEL_UP, () => {
+  audio.play('levelup');
+  ui.announce(`Level ${world.run.level}. Choose an upgrade.`);
+});
+bus.on(EV.RUN_END, () => audio.play('death'));
+
+// Browsers refuse to start audio without a gesture, so the context is created on
+// the first one and never again.
+const unlockAudio = () => audio.unlock();
+window.addEventListener('pointerdown', unlockAudio, { once: true });
+window.addEventListener('keydown', unlockAudio, { once: true });
+
+// ---------------------------------------------------------------------------
+// Layout
+// ---------------------------------------------------------------------------
+
+function handleResize() {
+  const rect = app.getBoundingClientRect();
+  camera.resize(rect.width, rect.height, window.devicePixelRatio || 1);
+  backend.resize(camera);
+  // The director spawns just outside the visible area, so it needs to know how
+  // much of the world the current viewport actually shows. Without this, an
+  // ultrawide monitor would see enemies pop into existence on screen.
+  world.setViewExtent(camera.halfDiagonal);
+}
+
+if (typeof ResizeObserver === 'function') {
+  new ResizeObserver(handleResize).observe(app);
+} else {
+  window.addEventListener('resize', handleResize);
+}
+// iOS fires resize before the new viewport metrics settle after a rotation.
+window.addEventListener('orientationchange', () => setTimeout(handleResize, 120));
+handleResize();
+
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden && state === 'playing') setState('paused');
+  else if (!document.hidden) loop.resetClock();
+});
+
+// ---------------------------------------------------------------------------
+// State machine
+// ---------------------------------------------------------------------------
+
+function setState(next) {
+  if (state === next) return;
+  state = next;
+  loop.setPaused(next !== 'playing');
+  ui.setScreen(next === 'playing' ? 'none' : next);
+  if (next === 'playing') loop.resetClock();
+}
+
+function startRun() {
+  audio.unlock();
+  world.reset((Date.now() ^ (Math.random() * 0xffffffff)) >>> 0);
+  hurtFlash = 0;
+  currentChoices = [];
+  ui.announce('Run started.');
+  ui.syncHud(world, 0, true);
+  setState('playing');
+}
+
+function enterLevelUp() {
+  const indices = world.rollUpgradeChoices(3);
+  if (indices.length === 0) {
+    // Every upgrade is maxed. Banking the level is meaningless at that point, so
+    // clear it rather than trapping the player behind an empty dialog.
+    world.run.pendingLevelUps = 0;
+    setState('playing');
+    return;
+  }
+  currentChoices = indices;
+  const levelLabel = document.getElementById('levelup-level');
+  if (levelLabel) levelLabel.textContent = String(world.run.level);
+  ui.showUpgrades(
+    indices.map((i) => ({
+      index: i,
+      name: UPGRADES[i].name,
+      desc: UPGRADES[i].desc,
+      stacks: world.stacks[i],
+      max: UPGRADES[i].max,
+    }))
+  );
+  setState('levelup');
+}
+
+function pickUpgrade(index) {
+  if (state !== 'levelup') return;
+  if (!world.applyUpgrade(index)) return;
+  audio.play('ui');
+  ui.syncHud(world, 0, true);
+  // A single orb can clear several thresholds at once, so keep offering cards
+  // until the bank is empty.
+  if (world.awaitingUpgrade) enterLevelUp();
+  else setState('playing');
+}
+
+function endRun() {
+  bestTime = Math.max(bestTime, world.run.time);
+  writeValue(BEST_KEY, String(bestTime));
+  ui.showGameOver(
+    { time: world.run.time, level: world.run.level, kills: world.run.kills },
+    bestTime
+  );
+  ui.announce(`Run over. You survived ${formatClock(world.run.time)} and reached level ${world.run.level}.`);
+  setState('gameover');
+}
+
+// ---------------------------------------------------------------------------
+// Frame
+// ---------------------------------------------------------------------------
+
+function preFrame() {
+  const p = world.player;
+  input.sample(camera, world.entities.x[p], world.entities.y[p]);
+  const a = input.actions;
+
+  if (a.mute) ui.setMuted(audio.toggleMute());
+  if (a.debug) debugVisible = !debugVisible;
+
+  switch (state) {
+    case 'title':
+      if (a.confirm || a.restart) startRun();
+      break;
+    case 'playing':
+      if (a.pause) setState('paused');
+      break;
+    case 'paused':
+      if (a.pause || a.cancel) setState('playing');
+      if (a.restart) startRun();
+      break;
+    case 'levelup': {
+      if (input.choice >= 0 && input.choice < currentChoices.length) {
+        pickUpgrade(currentChoices[input.choice]);
+      } else if (input.navX !== 0 || input.navY !== 0) {
+        moveCardFocus(input.navX + input.navY);
+      }
+      break;
+    }
+    case 'gameover':
+      if (a.confirm || a.restart) startRun();
+      break;
+    default:
+      break;
+  }
+}
+
+function moveCardFocus(delta) {
+  const cards = Array.from(document.querySelectorAll('#cards .card'));
+  if (cards.length === 0) return;
+  const current = cards.indexOf(/** @type {any} */ (document.activeElement));
+  const next = (current + delta + cards.length) % cards.length;
+  /** @type {HTMLElement} */ (cards[next]).focus();
+}
+
+function update(dt) {
+  if (state !== 'playing') return;
+  world.tick(dt, input.state);
+  if (world.run.over) {
+    endRun();
+    return;
+  }
+  if (world.awaitingUpgrade) enterLevelUp();
+}
+
+function render(alpha, frameDt) {
+  quality.sample(loop.stats.frameMs, frameDt);
+
+  camera.update(frameDt, world.focusX, world.focusY, world.shake, viewRng, !reducedMotion);
+  buildDrawList(world, drawList, camera, alpha, quality, performance.now() / 1000, reducedMotion);
+
+  const hpFraction = clamp(world.hp / Math.max(1, world.maxHp), 0, 1);
+  hurtFlash = Math.max(0, hurtFlash - frameDt * 3.2);
+  // Danger tint reads low heat continuously and spikes briefly on impact, so a
+  // hit is legible even at full health.
+  const danger = reducedMotion
+    ? clamp((0.4 - hpFraction) / 0.4, 0, 1) * 0.6
+    : Math.max(clamp((0.4 - hpFraction) / 0.4, 0, 1), hurtFlash * 0.55);
+
+  backend.render(drawList, camera, {
+    hpFraction,
+    additive: quality.additive,
+    showText: quality.showFloatText,
+    danger,
+  });
+
+  ui.syncHud(world, frameDt);
+  ui.setTouchStick(input.touchStick);
+  ui.setDebug(debugVisible ? debugText() : null);
+
+  // Edge-triggered input is consumed for the frame only after everything that
+  // could read it has run.
+  input.endFrame();
+}
+
+function debugText() {
+  const s = loop.stats;
+  const e = world.entities;
+  return [
+    `fps      ${s.fps.toFixed(0)}`,
+    `frame    ${s.frameMs.toFixed(2)} ms`,
+    `sim      ${s.simMs.toFixed(2)} ms  x${s.subSteps}`,
+    `render   ${s.renderMs.toFixed(2)} ms`,
+    `worst/s  ${s.worstFrameMs.toFixed(1)} ms`,
+    `dropped  ${s.droppedTicks}`,
+    `enemies  ${e.count(1)}`,
+    `bullets  ${e.count(2) + e.count(3)}`,
+    `orbs     ${e.count(4)}`,
+    `particle ${world.particles.count}`,
+    `draws    ${drawList.count}${drawList.dropped ? ' (+' + drawList.dropped + ' dropped)' : ''}`,
+    `quality  ${quality.label}`,
+    `zoom     ${camera.zoom.toFixed(2)} @dpr ${camera.dpr}`,
+  ].join('\n');
+}
+
+const loop = new GameLoop({
+  update,
+  render,
+  preFrame,
+  tickHz: SIM.tickHz,
+  maxSubSteps: SIM.maxSubSteps,
+  maxFrameSeconds: SIM.maxFrameSeconds,
+});
+
+ui.setScreen('title');
+ui.syncHud(world, 0, true);
+loop.setPaused(true);
+loop.start();
+
+// Exposed for debugging in the console and for the automated browser check.
+// Deliberately a single namespaced handle rather than a scatter of globals.
+globalThis.EmberDrift = { world, camera, loop, input, audio, quality, ui, drawList, getState: () => state };
+
+})();
+
+</script>
+</body>
+</html>

@@ -1,0 +1,490 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<meta name="color-scheme" content="dark">
+<meta name="theme-color" content="#14121C">
+<meta name="description" content="Ember Drift: a browser arena survivor. You are a cooling ember. Stay lit.">
+<title>Ember Drift</title>
+<style>
+/* ---------------------------------------------------------------------------
+   Design tokens.
+   The base is a deep slate-violet rather than black, and the two accents are in
+   tension on purpose: amber is heat, teal is cold, and the whole game is about
+   one becoming the other.
+   Type is a system monospace used as an instrument face -- no webfont, so
+   nothing to fetch and nothing to license.
+--------------------------------------------------------------------------- */
+:root {
+  --ink: #14121C;
+  --ash: #2A2635;
+  --ash-hi: #3B3548;
+  --bone: #E8E3D9;
+  --ember: #FF9F1C;
+  --coal: #7B5EA7;
+  --quench: #3DD6C0;
+  --blood: #E4405F;
+
+  --font-display: ui-monospace, "SFMono-Regular", "Cascadia Mono", Menlo, Consolas, monospace;
+  --font-body: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
+
+  --step-0: 0.6875rem;
+  --step-1: 0.8125rem;
+  --step-2: 1rem;
+  --step-3: clamp(1.25rem, 1rem + 1.2vw, 1.75rem);
+  --step-4: clamp(2rem, 1.2rem + 3.4vw, 3.25rem);
+
+  --track: 0.14em;
+  --gap: 0.75rem;
+  --radius: 3px;
+  --touch: 64px;
+
+  --safe-t: env(safe-area-inset-top, 0px);
+  --safe-b: env(safe-area-inset-bottom, 0px);
+  --safe-l: env(safe-area-inset-left, 0px);
+  --safe-r: env(safe-area-inset-right, 0px);
+}
+
+*, *::before, *::after { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+  overflow: hidden;
+  background: var(--ink);
+  color: var(--bone);
+  font-family: var(--font-body);
+  /* Stops iOS from bumping text size when the device rotates. */
+  -webkit-text-size-adjust: 100%;
+  overscroll-behavior: none;
+}
+
+#app {
+  position: fixed;
+  inset: 0;
+  /* Suppresses double-tap zoom, pull-to-refresh and text selection during play. */
+  touch-action: none;
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-tap-highlight-color: transparent;
+}
+
+#stage {
+  position: absolute;
+  inset: 0;
+  display: block;
+  width: 100%;
+  height: 100%;
+  touch-action: none;
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px; height: 1px;
+  margin: -1px; padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* --- heads-up display -------------------------------------------------- */
+
+#hud {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  transition: opacity 220ms ease;
+  padding: calc(var(--safe-t) + 0.75rem) calc(var(--safe-r) + 0.9rem)
+           calc(var(--safe-b) + 0.75rem) calc(var(--safe-l) + 0.9rem);
+}
+#hud.is-dim { opacity: 0.28; }
+
+/* The only piece of screen furniture that spans the display: a 3px hairline of
+   progress pinned to the very top edge. Everything else stays out of the way. */
+#xp-track {
+  position: absolute;
+  top: 0; left: 0; right: 0;
+  height: 3px;
+  background: var(--ash);
+}
+#xp-fill {
+  height: 100%;
+  background: var(--quench);
+  transform-origin: 0 50%;
+  transform: scaleX(0);
+  will-change: transform;
+}
+
+.readout {
+  position: absolute;
+  display: flex;
+  gap: 1.1rem;
+  align-items: flex-start;
+  font-family: var(--font-display);
+  text-transform: uppercase;
+  letter-spacing: var(--track);
+  font-variant-numeric: tabular-nums;
+  text-shadow: 0 1px 3px rgba(0,0,0,0.85);
+}
+.readout--left { top: calc(var(--safe-t) + 0.8rem); left: calc(var(--safe-l) + 0.9rem); }
+.readout--right { top: calc(var(--safe-t) + 0.8rem); right: calc(var(--safe-r) + 0.9rem); text-align: right; }
+.readout--right .field { align-items: flex-end; }
+
+.field { display: flex; flex-direction: column; gap: 0.2rem; }
+.field__label {
+  font-size: var(--step-0);
+  color: var(--coal);
+  letter-spacing: 0.2em;
+}
+.field__value { font-size: var(--step-3); line-height: 1; color: var(--bone); font-weight: 600; }
+.field__value--clock { color: var(--ember); }
+
+#heat-track {
+  width: 108px;
+  height: 4px;
+  margin-top: 0.35rem;
+  background: var(--ash);
+}
+#heat-fill {
+  height: 100%;
+  background: var(--ember);
+  transform-origin: 100% 50%;
+  transform: scaleX(1);
+  will-change: transform;
+  transition: background-color 200ms linear;
+}
+#heat-fill.is-critical { background: var(--blood); }
+
+#weapon-chips {
+  position: absolute;
+  left: calc(var(--safe-l) + 0.9rem);
+  bottom: calc(var(--safe-b) + 0.9rem);
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  margin: 0; padding: 0;
+  list-style: none;
+}
+.chip {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 0.4rem;
+  padding: 0.28rem 0.5rem;
+  border: 1px solid var(--ash-hi);
+  border-radius: var(--radius);
+  background: rgba(20,18,28,0.72);
+  font-family: var(--font-display);
+  font-size: var(--step-0);
+  text-transform: uppercase;
+  letter-spacing: var(--track);
+}
+.chip__name { color: var(--bone); }
+.chip__level { color: var(--ember); font-weight: 700; }
+
+#btn-mute {
+  position: absolute;
+  right: calc(var(--safe-r) + 0.9rem);
+  bottom: calc(var(--safe-b) + 0.9rem);
+  pointer-events: auto;
+  min-height: 44px;
+  padding: 0.5rem 0.85rem;
+}
+
+#debug {
+  position: absolute;
+  left: calc(var(--safe-l) + 0.9rem);
+  top: 50%;
+  transform: translateY(-50%);
+  font-family: var(--font-display);
+  font-size: var(--step-0);
+  line-height: 1.55;
+  color: var(--quench);
+  white-space: pre;
+  background: rgba(20,18,28,0.8);
+  border-left: 2px solid var(--quench);
+  padding: 0.5rem 0.7rem;
+}
+
+/* --- touch stick -------------------------------------------------------- */
+
+#stick {
+  position: absolute;
+  top: 0; left: 0;
+  width: 0; height: 0;
+  pointer-events: none;
+  z-index: 3;
+}
+#stick::before {
+  content: "";
+  position: absolute;
+  width: 124px; height: 124px;
+  margin: -62px 0 0 -62px;
+  border: 1px solid rgba(232,227,217,0.22);
+  border-radius: 50%;
+}
+#stick-nub {
+  position: absolute;
+  width: 46px; height: 46px;
+  margin: -23px 0 0 -23px;
+  border-radius: 50%;
+  background: rgba(255,159,28,0.24);
+  border: 1px solid var(--ember);
+}
+
+/* --- screens ------------------------------------------------------------ */
+
+#screens { position: absolute; inset: 0; z-index: 4; }
+
+.screen {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-content: center;
+  gap: 1.25rem;
+  padding: calc(var(--safe-t) + 1.5rem) calc(var(--safe-r) + 1.25rem)
+           calc(var(--safe-b) + 1.5rem) calc(var(--safe-l) + 1.25rem);
+  text-align: center;
+  background: rgba(20,18,28,0.86);
+  -webkit-backdrop-filter: blur(7px);
+  backdrop-filter: blur(7px);
+  overflow-y: auto;
+}
+.screen[hidden] { display: none; }
+
+.eyebrow {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: var(--step-0);
+  text-transform: uppercase;
+  letter-spacing: 0.4em;
+  color: var(--coal);
+}
+
+.title {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: var(--step-4);
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.16em;
+  line-height: 1;
+  color: var(--bone);
+}
+/* The one flourish in the whole interface: the title carries the same amber-to-
+   violet cooling gradient as the player's corona ring. */
+.title--brand {
+  background: linear-gradient(96deg, var(--ember) 0%, var(--ember) 38%, var(--coal) 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+.lede {
+  margin: 0 auto;
+  max-width: 46ch;
+  font-size: var(--step-2);
+  line-height: 1.55;
+  color: var(--bone);
+}
+.note {
+  margin: 0 auto;
+  max-width: 52ch;
+  font-size: var(--step-1);
+  line-height: 1.6;
+  color: #A99FBE;
+}
+.note kbd {
+  font-family: var(--font-display);
+  font-size: 0.9em;
+  padding: 0.1em 0.35em;
+  border: 1px solid var(--ash-hi);
+  border-radius: var(--radius);
+  color: var(--bone);
+}
+
+.btn {
+  font-family: var(--font-display);
+  font-size: var(--step-1);
+  text-transform: uppercase;
+  letter-spacing: var(--track);
+  color: var(--ink);
+  background: var(--ember);
+  border: 1px solid var(--ember);
+  border-radius: var(--radius);
+  padding: 0.85rem 1.6rem;
+  min-height: 48px;
+  cursor: pointer;
+  transition: background-color 140ms ease, color 140ms ease;
+}
+.btn:hover { background: #FFB44A; border-color: #FFB44A; }
+.btn--ghost { background: transparent; color: var(--bone); border-color: var(--ash-hi); }
+.btn--ghost:hover { background: var(--ash); border-color: var(--coal); }
+.btn:focus-visible, .card:focus-visible {
+  outline: 2px solid var(--quench);
+  outline-offset: 3px;
+}
+
+.actions { display: flex; gap: 0.75rem; justify-content: center; flex-wrap: wrap; }
+
+.stats {
+  display: flex;
+  gap: 2rem;
+  justify-content: center;
+  margin: 0;
+  font-family: var(--font-display);
+  font-variant-numeric: tabular-nums;
+}
+.stats div { display: flex; flex-direction: column; gap: 0.3rem; }
+.stats dt { font-size: var(--step-0); text-transform: uppercase; letter-spacing: 0.2em; color: var(--coal); }
+.stats dd { margin: 0; font-size: var(--step-3); color: var(--bone); }
+
+/* --- upgrade cards ------------------------------------------------------ */
+
+#cards {
+  display: grid;
+  grid-template-columns: repeat(var(--card-count, 3), minmax(0, 1fr));
+  gap: var(--gap);
+  width: min(940px, 100%);
+  margin-inline: auto;
+}
+@media (max-width: 720px) {
+  #cards { grid-template-columns: 1fr; }
+}
+
+.card {
+  position: relative;
+  display: grid;
+  grid-template-rows: auto auto 1fr auto;
+  justify-items: start;
+  gap: 0.5rem;
+  min-height: var(--touch);
+  padding: 1rem 1rem 0.85rem;
+  text-align: left;
+  color: var(--bone);
+  background: linear-gradient(180deg, #201C2C 0%, #191622 100%);
+  border: 1px solid var(--ash-hi);
+  border-radius: var(--radius);
+  cursor: pointer;
+  transition: border-color 140ms ease, transform 140ms ease;
+}
+.card:hover { border-color: var(--ember); transform: translateY(-2px); }
+.card__key {
+  font-family: var(--font-display);
+  font-size: var(--step-0);
+  color: var(--coal);
+  border: 1px solid var(--ash-hi);
+  border-radius: var(--radius);
+  padding: 0.05rem 0.4rem;
+}
+.card__name {
+  font-family: var(--font-display);
+  font-size: var(--step-2);
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: var(--track);
+  color: var(--ember);
+}
+.card__desc { font-size: var(--step-1); line-height: 1.5; color: #C9C1D8; }
+.card__pips { display: flex; gap: 4px; margin-top: 0.2rem; }
+.card__pips i {
+  width: 16px; height: 3px;
+  background: var(--ash-hi);
+}
+.card__pips i.is-filled { background: var(--quench); }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.001ms !important;
+    transition-duration: 0.001ms !important;
+  }
+  .card:hover { transform: none; }
+}
+</style>
+</head>
+<body>
+<div id="app">
+  <canvas id="stage" aria-label="Ember Drift playfield" role="img"></canvas>
+
+  <div id="hud">
+    <div id="xp-track"><div id="xp-fill"></div></div>
+
+    <div class="readout readout--left">
+      <div class="field">
+        <span class="field__label">Time</span>
+        <span class="field__value field__value--clock" id="stat-clock">00:00</span>
+      </div>
+      <div class="field">
+        <span class="field__label">Level</span>
+        <span class="field__value" id="stat-level">1</span>
+      </div>
+    </div>
+
+    <div class="readout readout--right">
+      <div class="field">
+        <span class="field__label">Kills</span>
+        <span class="field__value" id="stat-kills">0</span>
+      </div>
+      <div class="field">
+        <span class="field__label">Heat</span>
+        <span class="field__value" id="stat-heat">100/100</span>
+        <div id="heat-track"><div id="heat-fill"></div></div>
+      </div>
+    </div>
+
+    <ul id="weapon-chips"></ul>
+    <button type="button" class="btn btn--ghost" id="btn-mute" aria-pressed="false">Sound on</button>
+    <div id="debug" hidden></div>
+  </div>
+
+  <div id="stick" hidden><div id="stick-nub"></div></div>
+
+  <div id="screens">
+    <section id="screen-title" class="screen" aria-labelledby="title-heading">
+      <p class="eyebrow">Arena survivor</p>
+      <h1 class="title title--brand" id="title-heading">Ember Drift</h1>
+      <p class="lede">You are an ember, and you are going out. Everything in the dark is here to help that along.</p>
+      <p class="note">
+        Move with <kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd>, the arrow keys, a gamepad, or by dragging anywhere on screen.
+        You fire on your own — aim with the mouse or right stick if you want to choose a direction.
+        Every level, pick one upgrade.
+      </p>
+      <div class="actions"><button type="button" class="btn" id="btn-start">Start run</button></div>
+    </section>
+
+    <section id="screen-levelup" class="screen" role="dialog" aria-modal="true" aria-labelledby="levelup-heading" hidden>
+      <p class="eyebrow">Level <span id="levelup-level">2</span></p>
+      <h2 class="title" id="levelup-heading">Choose one</h2>
+      <div id="cards"></div>
+      <p class="note">Press <kbd>1</kbd>, <kbd>2</kbd> or <kbd>3</kbd>, or tap a card.</p>
+    </section>
+
+    <section id="screen-paused" class="screen" role="dialog" aria-modal="true" aria-labelledby="paused-heading" hidden>
+      <h2 class="title" id="paused-heading">Paused</h2>
+      <p class="note">The arena is holding still. It will not wait long.</p>
+      <div class="actions">
+        <button type="button" class="btn" id="btn-resume">Resume</button>
+        <button type="button" class="btn btn--ghost" id="btn-restart-pause">Restart run</button>
+      </div>
+    </section>
+
+    <section id="screen-gameover" class="screen" role="dialog" aria-modal="true" aria-labelledby="over-heading" hidden>
+      <p class="eyebrow">Run ended</p>
+      <h2 class="title" id="over-heading">You went out</h2>
+      <dl class="stats">
+        <div><dt>Survived</dt><dd id="final-time">00:00</dd></div>
+        <div><dt>Level</dt><dd id="final-level">1</dd></div>
+        <div><dt>Kills</dt><dd id="final-kills">0</dd></div>
+      </dl>
+      <p class="note" id="best-line"></p>
+      <div class="actions"><button type="button" class="btn" id="btn-restart-over">Run again</button></div>
+    </section>
+  </div>
+
+  <div id="live" class="sr-only" aria-live="polite" role="status"></div>
+</div>
+<script type="module" src="./src/main.js"></script>
+</body>
+</html>
