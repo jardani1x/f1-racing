@@ -1,0 +1,12 @@
+# Copy of f1_dashboard/.streamlit/config.toml. Streamlit reads config from the
+# working directory, and Streamlit Community Cloud runs apps from the repo root.
+
+[theme]
+base = "dark"
+primaryColor = "#00D2BE"
+backgroundColor = "#0A0B0D"
+secondaryBackgroundColor = "#121417"
+textColor = "#ECEEF0"
+
+[browser]
+gatherUsageStats = false
