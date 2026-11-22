@@ -1,6 +1,7 @@
 """Teal Line Telemetry: an unofficial F1 session dashboard built on FastF1.
 
-Run:  streamlit run f1_dashboard/app.py
+Run from this folder so .streamlit/config.toml (the dark theme) is picked up:
+    cd f1_dashboard && streamlit run app.py
 """
 from __future__ import annotations
 
@@ -98,7 +99,7 @@ if not sd.weather.empty:
     k[3].metric("Track temp", f"{w['TrackTemp'].mean():.1f} °C",
                 f"{w['TrackTemp'].min():.0f}–{w['TrackTemp'].max():.0f}", delta_color="off", delta_arrow="off")
     k[4].metric("Air · rain", f"{w['AirTemp'].mean():.1f} °C",
-                "rain seen" if w["Rainfall"].astype(bool).any() else "dry", delta_color="off", delta_arrow="off")
+                "rain seen" if w["Rainfall"].eq(True).any() else "dry", delta_color="off", delta_arrow="off")
 else:
     k[3].metric("Track temp", "—")
     k[4].metric("Air · rain", "—")
@@ -122,7 +123,7 @@ with tab_over:
                     table[q] = table[q].map(an.fmt_laptime)
             if table[["Q1", "Q2", "Q3"]].eq("—").all().all() if {"Q1", "Q2", "Q3"} <= set(table) else False:
                 table = table.drop(columns=["Q1", "Q2", "Q3"])
-                best = laps.groupby("Driver")["LapTime"].min().map(an.fmt_laptime)
+                best = valid.groupby("Driver")["LapTime"].min().map(an.fmt_laptime)
                 table["Best"] = table["Driver"].map(best)
         st.dataframe(table, hide_index=True, width="stretch")
     if sd.is_race:

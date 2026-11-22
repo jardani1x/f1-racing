@@ -102,3 +102,15 @@ def test_positions_drops_unknown():
 def test_sector_gap_has_no_float_residue():
     sec = an.sector_table(make_laps())
     assert (sec["Gap"] == 0.0).all()  # thirds of 90.1 s sum back with ~1e-9 error
+
+
+@pytest.mark.parametrize("value,expected", [
+    (119.99999999, "2:00.000"), (59.9996, "1:00.000"), (89.9999999, "1:30.000")])
+def test_fmt_laptime_rounds_before_splitting_minutes(value, expected):
+    assert an.fmt_laptime(value) == expected
+
+
+def test_clean_laps_keeps_laps_when_track_status_missing():
+    laps = make_laps(drivers=("AAA",))
+    laps["TrackStatus"] = np.nan  # feed failed to load
+    assert set(an.clean_laps(laps)["LapNumber"]) == set(range(1, 21)) - {10, 11}

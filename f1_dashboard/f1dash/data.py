@@ -49,11 +49,20 @@ class SessionData:
         return self.session in RACE_TYPES
 
     def drivers(self) -> list[str]:
-        """Abbreviations in classification order, falling back to lap data."""
-        if not self.results.empty and "Abbreviation" in self.results:
-            order = self.results.sort_values("Position", na_position="last")["Abbreviation"]
+        """Abbreviations in classification order. Practice has no classification
+        (Position is all NaN), so order by best valid lap time instead."""
+        res = self.results
+        if not res.empty and "Abbreviation" in res and res.get("Position", pd.Series(dtype=float)).notna().any():
+            order = res.sort_values("Position", na_position="last")["Abbreviation"]
             return [d for d in order.dropna().tolist() if d]
-        return sorted(self.laps["Driver"].dropna().unique().tolist()) if not self.laps.empty else []
+        if self.laps.empty:
+            return []
+        laps = self.laps
+        if "Deleted" in laps:
+            laps = laps[laps["Deleted"].fillna(False) != True]  # noqa: E712
+        best = laps.groupby("Driver")["LapTime"].min().sort_values(na_position="last")
+        return [d for d in best.index.tolist() if d] + sorted(
+            set(self.laps["Driver"].dropna()) - set(best.index))
 
 
 def _fastf1():
@@ -64,22 +73,48 @@ def _fastf1():
     return fastf1
 
 
+def started_sessions(sched: pd.DataFrame, now: pd.Timestamp) -> pd.DataFrame:
+    """Rounds with at least one session started by `now` (naive UTC), each listing
+    only its started sessions, newest round first. Includes the weekend in progress."""
+    rows = []
+    for _, r in sched.iterrows():
+        names = []
+        for i in range(1, 6):
+            name, start = r.get(f"Session{i}"), pd.to_datetime(r.get(f"Session{i}DateUtc"))
+            if isinstance(name, str) and name and pd.notna(start) and start <= now:
+                names.append(name)
+        if names:
+            rows.append((r["RoundNumber"], r["EventName"], names))
+    out = pd.DataFrame(rows, columns=["RoundNumber", "EventName", "Sessions"])
+    return out.sort_values("RoundNumber", ascending=False).reset_index(drop=True)
+
+
 def completed_events(year: int) -> pd.DataFrame:
-    """Rounds of `year` whose last session has started, newest first."""
+    """Rounds of `year` with at least one started session, newest first."""
     f1 = _fastf1()
     try:
         sched = f1.get_event_schedule(year, include_testing=False)
     except Exception as exc:  # network, parsing, backend outage
         raise DataUnavailable(f"Couldn't fetch the {year} calendar ({type(exc).__name__}).") from exc
-    now = pd.Timestamp(dt.datetime.now(dt.timezone.utc)).tz_localize(None)
-    date_col = "Session5DateUtc" if "Session5DateUtc" in sched else "EventDate"
-    done = sched[pd.to_datetime(sched[date_col]) <= now]
-    sessions = done.apply(
-        lambda r: [r[f"Session{i}"] for i in range(1, 6)
-                   if isinstance(r.get(f"Session{i}"), str) and r[f"Session{i}"]], axis=1)
-    out = pd.DataFrame({"RoundNumber": done["RoundNumber"], "EventName": done["EventName"],
-                        "Sessions": sessions})
-    return out.sort_values("RoundNumber", ascending=False).reset_index(drop=True)
+    return started_sessions(sched, pd.Timestamp(dt.datetime.now(dt.timezone.utc)).tz_localize(None))
+
+
+def lap_telemetry(lap) -> Optional[LapTelemetry]:
+    """Car channels for the overlay, plus X/Y for the map when available. Position
+    data is optional: losing it must not hide the speed/throttle/brake traces."""
+    try:
+        car = pd.DataFrame(lap.get_car_data().add_distance())
+    except Exception:
+        log.info("car data unavailable", exc_info=True)
+        return None
+    if car.empty:
+        return None
+    try:
+        pos = pd.DataFrame(lap.get_telemetry())
+    except Exception:
+        log.info("position data unavailable", exc_info=True)
+        pos = pd.DataFrame()
+    return LapTelemetry(lap=pd.Series(lap), car=car, pos=pos)
 
 
 def load_session(year: int, event: str, session: str) -> SessionData:
@@ -120,15 +155,7 @@ def load_session(year: int, event: str, session: str) -> SessionData:
             lap = drv_laps.pick_not_deleted().pick_fastest(only_by_time=True)
         if lap is None or pd.isna(lap["LapTime"]):
             return None
-        try:
-            car = pd.DataFrame(lap.get_car_data().add_distance())
-            pos = pd.DataFrame(lap.get_telemetry())
-        except Exception:
-            log.info("telemetry unavailable for %s", drv, exc_info=True)
-            return None
-        if car.empty:
-            return None
-        return LapTelemetry(lap=pd.Series(lap), car=car, pos=pos)
+        return lap_telemetry(lap)
 
     return SessionData(
         year=year, event=str(ses.event["EventName"]), session=ses.name, laps=laps,

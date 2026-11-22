@@ -124,3 +124,18 @@ def test_season_falls_back_when_current_year_has_no_rounds(monkeypatch):
     at = AppTest.from_file(APP, default_timeout=60).run()
     assert at.sidebar.selectbox[0].value == this_year - 1
     assert not at.exception and not at.info
+
+
+def test_rain_ignores_missing_samples_and_best_excludes_deleted(monkeypatch):
+    def loader(y, r, s):
+        sd = make_session(s)
+        sd.weather["Rainfall"] = pd.Series([False, None], dtype=object)
+        i = sd.laps.index[(sd.laps["Driver"] == "CCC") & (sd.laps["LapNumber"] == 2)][0]
+        sd.laps.loc[i, ["LapTime", "Deleted"]] = [pd.Timedelta(seconds=80), True]
+        return sd
+    at = run(monkeypatch, loader, session_choice="Qualifying")
+    assert not at.exception, at.exception
+    m = {x.label: x for x in at.metric}
+    assert m["Air · rain"].delta == "dry"
+    best = at.dataframe[0].value.set_index("Driver")["Best"]
+    assert best["CCC"] == "1:30.700"  # not the deleted 1:20.000

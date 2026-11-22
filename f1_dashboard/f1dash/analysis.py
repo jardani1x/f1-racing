@@ -17,7 +17,7 @@ def fmt_laptime(value) -> str:
         return "—"
     secs = value.total_seconds() if isinstance(value, pd.Timedelta) else float(value)
     sign = "-" if secs < 0 else ""
-    secs = abs(secs)
+    secs = round(abs(secs), 3)  # round before divmod so 119.9999 -> 2:00.000, not 1:60.000
     minutes, rem = divmod(secs, 60)
     return f"{sign}{int(minutes)}:{rem:06.3f}" if minutes else f"{sign}{rem:.3f}"
 
@@ -39,7 +39,8 @@ def clean_laps(laps: pd.DataFrame, threshold: float = 1.07,
     out = out[out["PitInTime"].isna() & out["PitOutTime"].isna()]
     if "Deleted" in out:
         out = out[out["Deleted"].fillna(False) != True]  # noqa: E712
-    if green_only and "TrackStatus" in out:
+    # Skip the filter when the track-status feed didn't load (all NaN).
+    if green_only and "TrackStatus" in out and out["TrackStatus"].notna().any():
         # TrackStatus concatenates every status seen during the lap, e.g. "14".
         out = out[out["TrackStatus"].astype(str) == "1"]
     if out.empty:
